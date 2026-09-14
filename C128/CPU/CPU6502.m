@@ -1,0 +1,1872 @@
+/*
+ * VIC20 - a Commodore VIC-20 emulator.
+ * Copyright (C) 2018-2026 Gregory John Casamento
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#import "CPU6502.h"
+#import "CPU6502+Instructions.h"
+#if !defined(CPU6502_STANDALONE)
+#import "Datasette.h"
+#import "DiskDrive.h"
+#import "FallbackBASIC.h"
+#import "FallbackROMs.h"
+#import "KeyboardMatrix.h"
+#import "RAM.h"
+#import "ROM.h"
+#import "VIA6522.h"
+#import "VIC20MemoryManager.h"
+#import "VIC6560.h"
+#endif
+
+#if defined(CPU6502_STANDALONE)
+@interface CPU6502FlatMemory : NSObject <CPU6502Bus>
+{
+  uint8 *_bytes;
+  NSUInteger _size;
+}
+- (id)initWithSize:(NSUInteger)size;
+@end
+
+@implementation CPU6502FlatMemory
+- (id)initWithSize:(NSUInteger)size
+{
+  if ((self = [super init]) != nil)
+    {
+      _size = MIN (size, 65536);
+      _bytes = calloc (_size, sizeof (uint8));
+    }
+  return self;
+}
+- (void)dealloc
+{
+  free (_bytes);
+  [super dealloc];
+}
+- (uint8)readMemory:(uint16)address
+{
+  return address < _size ? _bytes[address] : 0xFF;
+}
+- (void)writeMemory:(uint8)value address:(uint16)address
+{
+  if (address < _size)
+    _bytes[address] = value;
+}
+@end
+#endif
+
+static NSMutableDictionary *instructionMap;
+static NSMutableArray *opCodes;
+static NSString *methodsString;
+
+@implementation CPU6502
+
+/*
+CPU INSTRUCTION TABLE
+----
+ HI    LO-NIBBLE
+       00          01          02     03     04        05         06         07
+08       09         0A       0B   0C        0D          0E         0F 00    BRK
+impl    ORA X,ind   ---    ---    ---       ORA zpg    ASL zpg    ---  PHP impl
+ORA #      ASL A    ---  ---       ORA abs     ASL abs    --- 10    BPL rel ORA
+ind,Y   ---    ---    ---       ORA zpg,X  ASL zpg,X  ---  CLC impl ORA abs,Y
+---      ---  ---       ORA abs,X   ASL abs,X  --- 20    JSR abs     AND X,ind
+---    ---    BIT zpg   AND zpg    ROL zpg    ---  PLP impl AND #      ROL A
+--- BIT abs   AND abs     ROL abs    --- 30    BMI rel     AND ind,Y   --- ---
+---       AND zpg,X  ROL zpg,X  ---  SEC impl AND abs,Y  ---      ---  --- AND
+abs,X   ROL abs,X  --- 40    RTI impl    EOR X,ind   ---    ---    --- EOR zpg
+LSR zpg    ---  PHA impl EOR #      LSR A    ---  JMP abs   EOR abs LSR abs ---
+50    BVC rel     EOR ind,Y   ---    ---    ---       EOR zpg,X  LSR zpg,X  ---
+CLI impl EOR abs,Y  ---      ---  ---       EOR abs,X   LSR abs,X
+--- 60    RTS impl    ADC X,ind   ---    ---    ---       ADC zpg    ROR zpg
+--- PLA impl ADC #      ROR A    ---  JMP ind   ADC abs     ROR abs    --- 70
+BVS rel     ADC ind,Y   ---    ---    ---       ADC zpg,X  ROR zpg,X  ---  SEI
+impl ADC abs,Y  ---      ---  ---       ADC abs,X   ROR abs,X  --- 80    ---
+STA X,ind   ---    ---    STY zpg   STA zpg    STX zpg    ---  DEY impl --- TXA
+impl
+---  STY abs   STA abs     STX abs    --- 90    BCC rel     STA ind,Y   --- ---
+STY zpg,X STA zpg,X  STX zpg,Y  ---  TYA impl STA abs,Y  TXS impl ---  --- STA
+abs,X   ---        --- A0    LDY #       LDA X,ind   LDX #  ---    LDY zpg LDA
+zpg    LDX zpg    ---  TAY impl LDA #      TAX impl ---  LDY abs   LDA abs LDX
+abs    --- B0    BCS rel     LDA ind,Y   ---    ---    LDY zpg,X LDA zpg,X  LDX
+zpg,Y  ---  CLV impl LDA abs,Y  TSX impl ---  LDY abs,X LDA abs,X   LDX abs,Y
+--- C0    CPY #       CMP X,ind   ---    ---    CPY zpg   CMP zpg    DEC zpg
+--- INY impl CMP #      DEX impl ---  CPY abs   CMP abs     DEC abs    --- D0
+BNE rel     CMP ind,Y   ---    ---    ---       CMP zpg,X  DEC zpg,X  ---  CLD
+impl CMP abs,Y  ---      ---  ---       CMP abs,X   DEC abs,X  --- E0    CPX #
+SBC X,ind   ---    ---    CPX zpg   SBC zpg    INC zpg    ---  INX impl SBC #
+NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
+---
+---    ---       SBC zpg,X  INC zpg,X  ---  SED impl SBC abs,Y  ---      ---
+--- SBC abs,X   INC abs,X  ---
+----
+ */
+
++ (NSDictionary *)buildDictForInstructionName:(NSString *)name
+                                    paramters:(NSNumber *)parameters
+                                       cycles:(NSNumber *)cycles
+                                       method:(NSString *)methodName
+{
+  NSDictionary *insDict = [NSDictionary
+      dictionaryWithObjectsAndKeys:name, @"name", parameters, @"parameters",
+                                   cycles, @"cycles", methodName,
+                                   @"methodName", nil];
+  return insDict;
+}
+
++ (void)addOpcode:(NSInteger)op
+             name:(NSString *)name
+           params:(NSInteger)par
+           cycles:(NSInteger)cycles
+           method:(NSString *)method
+{
+  NSNumber *opcode = [NSNumber numberWithInteger:op];
+  NSDictionary *dict =
+      [self buildDictForInstructionName:name
+                              paramters:[NSNumber numberWithInteger:par]
+                                 cycles:[NSNumber numberWithInteger:cycles]
+                                 method:method];
+  [instructionMap setObject:dict forKey:opcode];
+  [opCodes addObject:opcode];
+}
+
++ (void)generateMethodForDict:(NSDictionary *)dict
+{
+  NSString *name = [dict objectForKey:@"name"];
+  NSString *mname = [dict objectForKey:@"methodName"];
+  NSNumber *parameters = [dict objectForKey:@"parameters"];
+  NSInteger par = [parameters integerValue];
+  NSString *methodString = nil;
+  NSString *parameterStatements = @"";
+
+  // compose parameters...
+  for (int i = 0; i < par - 1; i++)
+    {
+      parameterStatements =
+          [parameterStatements stringByAppendingFormat:@"    pc++;\n"];
+      parameterStatements = [parameterStatements
+          stringByAppendingFormat:@"    uint8 param%d = [ram read: pc];\n",
+                                  i + 1];
+      parameterStatements = [parameterStatements
+          stringByAppendingFormat:
+              @"    [self debugLogWithFormat:@\"param = %@\", param%d);\n",
+              @"%X", i + 1];
+    }
+
+  // Build method....
+  methodString =
+      [NSString stringWithFormat:@"/* Implementation of %@ */\n"
+                                 @"- (void) %@\n"
+                                 @"{\n"
+                                 @"    [self debugLogWithFormat:@\"%@\"];\n"
+                                 @"%@"
+                                 @"}\n",
+                                 name, mname, name, parameterStatements];
+
+  // Add to methods...
+  methodsString = [methodsString stringByAppendingString:methodString];
+  methodsString = [methodsString stringByAppendingString:@"\n"];
+}
+
++ (void)generateMethods
+{
+  NSEnumerator *en = [opCodes objectEnumerator];
+  NSObject *k = nil;
+  while ((k = [en nextObject]) != nil)
+    {
+      NSDictionary *o = [instructionMap objectForKey:k];
+      [self generateMethodForDict:o];
+    }
+  NSLog (@"\n%@", methodsString);
+}
+
++ (void)buildInstructionMap
+{
+  NSLog (@"####### Initializing CPU");
+
+  /* DOCS TAKEN FROM: https://www.masswerk.at/6502/6502_instruction_set.html */
+  /*
+   *  add 1 to cycles if page boundery is crossed
+
+   ** add 1 to cycles if branch occurs on same page
+   add 2 to cycles if branch occurs to different page
+
+
+   Legend to Flags:  + .... modified
+                     - .... not modified
+                     1 .... set
+                     0 .... cleared
+                    M6 .... memory bit 6
+                    M7 .... memory bit 7
+   */
+
+  instructionMap = [[NSMutableDictionary alloc] init];
+  opCodes = [[NSMutableArray alloc] init];
+  methodsString = @"";
+
+  /*
+  ADC  Add Memory to Accumulator with Carry
+
+  A + M + C -> A, C                N Z C I D V
+                                   + + + - - +
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  immidiate     ADC #oper     69    2     2
+  zeropage      ADC oper      65    2     3
+  zeropage,X    ADC oper,X    75    2     4
+  absolute      ADC oper      6D    3     4
+  absolute,X    ADC oper,X    7D    3     4*
+  absolute,Y    ADC oper,Y    79    3     4*
+  (indirect,X)  ADC (oper,X)  61    2     6
+  (indirect),Y  ADC (oper),Y  71    2     5*
+  */
+  [self addOpcode:0x69 name:@"ADC" params:2 cycles:2 method:@"ADC_immediate"];
+  [self addOpcode:0x65 name:@"ADC" params:2 cycles:3 method:@"ADC_zeropage"];
+  [self addOpcode:0x75 name:@"ADC" params:2 cycles:4 method:@"ADC_zeropageX"];
+  [self addOpcode:0x6d name:@"ADC" params:3 cycles:4 method:@"ADC_absolute"];
+  [self addOpcode:0x7d name:@"ADC" params:3 cycles:4 method:@"ADC_absoluteX"];
+  [self addOpcode:0x79 name:@"ADC" params:3 cycles:4 method:@"ADC_absoluteY"];
+  [self addOpcode:0x61 name:@"ADC" params:4 cycles:6 method:@"ADC_indirectX"];
+  [self addOpcode:0x71 name:@"ADC" params:4 cycles:5 method:@"ADC_indirectY"];
+
+  /*
+   AND  AND Memory with Accumulator
+
+   A AND M -> A                     N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     AND #oper     29    2     2
+   zeropage      AND oper      25    2     3
+   zeropage,X    AND oper,X    35    2     4
+   absolute      AND oper      2D    3     4
+   absolute,X    AND oper,X    3D    3     4*
+   absolute,Y    AND oper,Y    39    3     4*
+   (indirect,X)  AND (oper,X)  21    2     6
+   (indirect),Y  AND (oper),Y  31    2     5*
+   */
+  [self addOpcode:0x29 name:@"AND" params:2 cycles:2 method:@"AND_immediate"];
+  [self addOpcode:0x25 name:@"AND" params:2 cycles:3 method:@"AND_zeropage"];
+  [self addOpcode:0x35 name:@"AND" params:2 cycles:4 method:@"AND_zeropageX"];
+  [self addOpcode:0x2d name:@"AND" params:3 cycles:4 method:@"AND_absolute"];
+  [self addOpcode:0x3d name:@"AND" params:3 cycles:4 method:@"AND_absoluteX"];
+  [self addOpcode:0x39 name:@"AND" params:3 cycles:4 method:@"AND_absoluteY"];
+  [self addOpcode:0x21 name:@"AND" params:2 cycles:6 method:@"AND_indirectX"];
+  [self addOpcode:0x31 name:@"AND" params:2 cycles:5 method:@"AND_indirectY"];
+
+  /*
+   ASL  Shift Left One Bit (Memory or Accumulator)
+
+   C <- [76543210] <- 0             N Z C I D V
+                                    + + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   accumulator   ASL A         0A    1     2
+   zeropage      ASL oper      06    2     5
+   zeropage,X    ASL oper,X    16    2     6
+   absolute      ASL oper      0E    3     6
+   absolute,X    ASL oper,X    1E    3     7
+   */
+  [self addOpcode:0x0a
+             name:@"ASL"
+           params:1
+           cycles:2
+           method:@"ASL_accumulator"];
+  [self addOpcode:0x06 name:@"ASL" params:2 cycles:5 method:@"ASL_zeropage"];
+  [self addOpcode:0x16 name:@"ASL" params:2 cycles:6 method:@"ASL_zeropageX"];
+  [self addOpcode:0x0e name:@"ASL" params:3 cycles:6 method:@"ASL_absolute"];
+  [self addOpcode:0x1e name:@"ASL" params:3 cycles:7 method:@"ASL_absoluteX"];
+
+  /*
+   BCC  Branch on Carry Clear
+
+   branch on C = 0                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BCC oper      90    2     2**
+   */
+  [self addOpcode:0x90 name:@"BCC" params:2 cycles:2 method:@"BCC_relative"];
+
+  /*
+   BCS  Branch on Carry Set
+
+   branch on C = 1                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BCS oper      B0    2     2**
+   */
+  [self addOpcode:0xb0 name:@"BCS" params:2 cycles:2 method:@"BCS_relative"];
+
+  /*
+   BEQ  Branch on Result Zero
+
+   branch on Z = 1                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BEQ oper      F0    2     2**
+  */
+  [self addOpcode:0xf0 name:@"BEQ" params:2 cycles:2 method:@"BEQ_relative"];
+
+  /*
+   BIT  Test Bits in Memory with Accumulator
+
+   bits 7 and 6 of operand are transfered to bit 7 and 6 of SR (N,V);
+   the zeroflag is set to the result of operand AND accumulator.
+
+   A AND M, M7 -> N, M6 -> V        N Z C I D V
+                                   M7 + - - - M6
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   zeropage      BIT oper      24    2     3
+   absolute      BIT oper      2C    3     4
+   */
+  [self addOpcode:0x24 name:@"BIT" params:2 cycles:3 method:@"BIT_zeropage"];
+  [self addOpcode:0x2c name:@"BIT" params:3 cycles:4 method:@"BIT_absolute"];
+
+  /*
+   BMI  Branch on Result Minus
+
+   branch on N = 1                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BMI oper      30    2     2**
+   */
+  [self addOpcode:0x30 name:@"BMI" params:2 cycles:2 method:@"BMI_relative"];
+
+  /*
+   BNE  Branch on Result not Zero
+
+   branch on Z = 0                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BNE oper      D0    2     2**
+   */
+  [self addOpcode:0xd0 name:@"BNE" params:2 cycles:2 method:@"BNE_relative"];
+
+  /*
+   BPL  Branch on Result Plus
+
+   branch on N = 0                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BPL oper      10    2     2**
+   */
+  [self addOpcode:0x10 name:@"BPL" params:2 cycles:2 method:@"BPL_relative"];
+
+  /*
+   BRK  Force Break
+
+   interrupt,                       N Z C I D V
+   push PC+2, push SR               - - - 1 - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       BRK           00    1     7
+   */
+  [self addOpcode:0x00 name:@"BRK" params:1 cycles:7 method:@"BRK_implied"];
+
+  /*
+   BVC  Branch on Overflow Clear
+
+   branch on V = 0                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BVC oper      50    2     2**
+   */
+  [self addOpcode:0x50 name:@"BVC" params:2 cycles:2 method:@"BVC_relative"];
+
+  /*
+   BVS  Branch on Overflow Set
+
+   branch on V = 1                  N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   relative      BVC oper      70    2     2**
+   */
+  [self addOpcode:0x70 name:@"BVS" params:2 cycles:2 method:@"BVS_relative"];
+
+  /*
+   CLC  Clear Carry Flag
+
+   0 -> C                           N Z C I D V
+                                    - - 0 - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       CLC           18    1     2
+   */
+  [self addOpcode:0x18 name:@"CLC" params:1 cycles:2 method:@"CLC_implied"];
+
+  /*
+   CLD  Clear Decimal Mode
+
+   0 -> D                           N Z C I D V
+                                    - - - - 0 -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       CLD           D8    1     2
+   */
+  [self addOpcode:0xd8 name:@"CLD" params:1 cycles:2 method:@"CLD_implied"];
+
+  /*
+
+   CLI  Clear Interrupt Disable Bit
+
+   0 -> I                           N Z C I D V
+                                    - - - 0 - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       CLI           58    1     2
+   */
+  [self addOpcode:0x58 name:@"CLI" params:1 cycles:2 method:@"CLI_implied"];
+
+  /*
+
+   CLV  Clear Overflow Flag
+
+   0 -> V                           N Z C I D V
+                                    - - - - - 0
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       CLV           B8    1     2
+   */
+  [self addOpcode:0xb8 name:@"CLV" params:1 cycles:2 method:@"CLV_implied"];
+
+  /*
+   CMP  Compare Memory with Accumulator
+
+   A - M                            N Z C I D V
+                                    + + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     CMP #oper     C9    2     2
+   zeropage      CMP oper      C5    2     3
+   zeropage,X    CMP oper,X    D5    2     4
+   absolute      CMP oper      CD    3     4
+   absolute,X    CMP oper,X    DD    3     4*
+   absolute,Y    CMP oper,Y    D9    3     4*
+   (indirect,X)  CMP (oper,X)  C1    2     6
+   (indirect),Y  CMP (oper),Y  D1    2     5*
+   */
+  [self addOpcode:0xc9 name:@"CMP" params:2 cycles:2 method:@"CMP_immediate"];
+  [self addOpcode:0xc5 name:@"CMP" params:2 cycles:3 method:@"CMP_zeropage"];
+  [self addOpcode:0xd5 name:@"CMP" params:2 cycles:4 method:@"CMP_zeropageX"];
+  [self addOpcode:0xcd name:@"CMP" params:3 cycles:4 method:@"CMP_absolute"];
+  [self addOpcode:0xdd name:@"CMP" params:3 cycles:4 method:@"CMP_absoluteX"];
+  [self addOpcode:0xd9 name:@"CMP" params:3 cycles:4 method:@"CMP_absoluteY"];
+  [self addOpcode:0xc1 name:@"CMP" params:2 cycles:6 method:@"CMP_indirectX"];
+  [self addOpcode:0xd1 name:@"CMP" params:2 cycles:5 method:@"CMP_indirectY"];
+
+  /*
+   CPX  Compare Memory and Index X
+
+   X - M                            N Z C I D V
+                                    + + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     CPX #oper     E0    2     2
+   zeropage      CPX oper      E4    2     3
+   absolute      CPX oper      EC    3     4
+   */
+  [self addOpcode:0xe0 name:@"CPX" params:2 cycles:2 method:@"CPX_immediate"];
+  [self addOpcode:0xe4 name:@"CPX" params:2 cycles:3 method:@"CPX_zeropage"];
+  [self addOpcode:0xec name:@"CPX" params:3 cycles:4 method:@"CPX_absolute"];
+
+  /*
+   CPY  Compare Memory and Index Y
+
+   Y - M                            N Z C I D V
+                                    + + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     CPY #oper     C0    2     2
+   zeropage      CPY oper      C4    2     3
+   absolute      CPY oper      CC    3     4
+   */
+  [self addOpcode:0xc0 name:@"CPY" params:2 cycles:2 method:@"CPY_immediate"];
+  [self addOpcode:0xc4 name:@"CPY" params:2 cycles:3 method:@"CPY_zeropage"];
+  [self addOpcode:0xcc name:@"CPY" params:3 cycles:4 method:@"CPY_absolute"];
+
+  /*
+   DEC  Decrement Memory by One
+
+   M - 1 -> M                       N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   zeropage      DEC oper      C6    2     5
+   zeropage,X    DEC oper,X    D6    2     6
+   absolute      DEC oper      CE    3     3
+   absolute,X    DEC oper,X    DE    3     7
+   */
+  [self addOpcode:0xc6 name:@"DEC" params:2 cycles:2 method:@"DEC_zeropage"];
+  [self addOpcode:0xd6 name:@"DEC" params:2 cycles:3 method:@"DEC_zeropageX"];
+  [self addOpcode:0xce name:@"DEC" params:3 cycles:4 method:@"DEC_absolute"];
+  [self addOpcode:0xde name:@"DEC" params:3 cycles:4 method:@"DEC_absoluteX"];
+
+  /*
+  DEX  Decrement Index X by One
+
+  X - 1 -> X                       N Z C I D V
+                                   + + - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       DEC           CA    1     2
+  */
+  [self addOpcode:0xca name:@"DEX" params:1 cycles:2 method:@"DEX_implied"];
+
+  /*
+   DEY  Decrement Index Y by One
+
+   Y - 1 -> Y                       N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       DEC           88    1     2
+  */
+  [self addOpcode:0x88 name:@"DEY" params:1 cycles:2 method:@"DEY_implied"];
+
+  /*
+   EOR  Exclusive-OR Memory with Accumulator
+
+   A EOR M -> A                     N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     EOR #oper     49    2     2
+   zeropage      EOR oper      45    2     3
+   zeropage,X    EOR oper,X    55    2     4
+   absolute      EOR oper      4D    3     4
+   absolute,X    EOR oper,X    5D    3     4*
+   absolute,Y    EOR oper,Y    59    3     4*
+   (indirect,X)  EOR (oper,X)  41    2     6
+   (indirect),Y  EOR (oper),Y  51    2     5*
+   */
+  [self addOpcode:0x49 name:@"EOR" params:2 cycles:2 method:@"EOR_immediate"];
+  [self addOpcode:0x45 name:@"EOR" params:2 cycles:3 method:@"EOR_zeropage"];
+  [self addOpcode:0x55 name:@"EOR" params:2 cycles:4 method:@"EOR_zeropageX"];
+  [self addOpcode:0x4d name:@"EOR" params:3 cycles:4 method:@"EOR_absolute"];
+  [self addOpcode:0x5d name:@"EOR" params:3 cycles:4 method:@"EOR_absoluteX"];
+  [self addOpcode:0x59 name:@"EOR" params:3 cycles:4 method:@"EOR_absoluteY"];
+  [self addOpcode:0x41 name:@"EOR" params:2 cycles:6 method:@"EOR_indirectX"];
+  [self addOpcode:0x51 name:@"EOR" params:2 cycles:5 method:@"EOR_indirectY"];
+
+  /*
+  INC  Increment Memory by One
+
+  M + 1 -> M                       N Z C I D V
+                                   + + - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  zeropage      INC oper      E6    2     5
+  zeropage,X    INC oper,X    F6    2     6
+  absolute      INC oper      EE    3     6
+  absolute,X    INC oper,X    FE    3     7
+  */
+  [self addOpcode:0xe6 name:@"INC" params:2 cycles:2 method:@"INC_zeropage"];
+  [self addOpcode:0xf6 name:@"INC" params:2 cycles:3 method:@"INC_zeropageX"];
+  [self addOpcode:0xee name:@"INC" params:3 cycles:4 method:@"INC_absolute"];
+  [self addOpcode:0xfe name:@"INC" params:3 cycles:4 method:@"INC_absoluteX"];
+
+  /*
+   INX  Increment Index X by One
+
+   X + 1 -> X                       N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       INX           E8    1     2
+   */
+  [self addOpcode:0xe8 name:@"INX" params:1 cycles:2 method:@"INX_implied"];
+
+  /*
+   INY  Increment Index Y by One
+
+   Y + 1 -> Y                       N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       INY           C8    1     2
+  */
+  [self addOpcode:0xc8 name:@"INY" params:1 cycles:2 method:@"INY_implied"];
+
+  /*
+   JMP  Jump to New Location
+
+   (PC+1) -> PCL                    N Z C I D V
+   (PC+2) -> PCH                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   absolute      JMP oper      4C    3     3
+   indirect      JMP (oper)    6C    3     5
+   */
+  [self addOpcode:0x4c name:@"JMP" params:3 cycles:3 method:@"JMP_absolute"];
+  [self addOpcode:0x6c name:@"JMP" params:3 cycles:5 method:@"JMP_indirect"];
+
+  /*
+   JSR  Jump to New Location Saving Return Address
+
+   push (PC+2),                     N Z C I D V
+   (PC+1) -> PCL                    - - - - - -
+   (PC+2) -> PCH
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   absolute      JSR oper      20    3     6
+   */
+  [self addOpcode:0x20 name:@"JSR" params:3 cycles:6 method:@"JSR_absolute"];
+
+  /*
+   LDA  Load Accumulator with Memory
+
+   M -> A                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     LDA #oper     A9    2     2
+   zeropage      LDA oper      A5    2     3
+   zeropage,X    LDA oper,X    B5    2     4
+   absolute      LDA oper      AD    3     4
+   absolute,X    LDA oper,X    BD    3     4*
+   absolute,Y    LDA oper,Y    B9    3     4*
+   (indirect,X)  LDA (oper,X)  A1    2     6
+   (indirect),Y  LDA (oper),Y  B1    2     5*
+   */
+  [self addOpcode:0xa9 name:@"LDA" params:2 cycles:2 method:@"LDA_immediate"];
+  [self addOpcode:0xa5 name:@"LDA" params:2 cycles:3 method:@"LDA_zeropage"];
+  [self addOpcode:0xb5 name:@"LDA" params:2 cycles:4 method:@"LDA_zeropageX"];
+  [self addOpcode:0xad name:@"LDA" params:3 cycles:4 method:@"LDA_absolute"];
+  [self addOpcode:0xbd name:@"LDA" params:3 cycles:4 method:@"LDA_absoluteX"];
+  [self addOpcode:0xb9 name:@"LDA" params:3 cycles:4 method:@"LDA_absoluteY"];
+  [self addOpcode:0xa1 name:@"LDA" params:2 cycles:6 method:@"LDA_indirectX"];
+  [self addOpcode:0xb1 name:@"LDA" params:2 cycles:5 method:@"LDA_indirectY"];
+
+  /*
+   LDX  Load Index X with Memory
+
+   M -> X                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     LDX #oper     A2    2     2
+   zeropage      LDX oper      A6    2     3
+   zeropage,Y    LDX oper,Y    B6    2     4
+   absolute      LDX oper      AE    3     4
+   absolute,Y    LDX oper,Y    BE    3     4*
+   */
+  [self addOpcode:0xa2 name:@"LDX" params:2 cycles:2 method:@"LDX_immediate"];
+  [self addOpcode:0xa6 name:@"LDX" params:2 cycles:3 method:@"LDX_zeropage"];
+  [self addOpcode:0xb6 name:@"LDX" params:2 cycles:4 method:@"LDX_zeropageY"];
+  [self addOpcode:0xae name:@"LDX" params:3 cycles:4 method:@"LDX_absolute"];
+  [self addOpcode:0xbe name:@"LDX" params:3 cycles:4 method:@"LDX_absoluteY"];
+
+  /*
+  LDY  Load Index Y with Memory
+
+  M -> Y                           N Z C I D V
+                                   + + - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  immidiate     LDY #oper     A0    2     2
+  zeropage      LDY oper      A4    2     3
+  zeropage,X    LDY oper,X    B4    2     4
+  absolute      LDY oper      AC    3     4
+  absolute,X    LDY oper,X    BC    3     4*
+  */
+  [self addOpcode:0xa0 name:@"LDY" params:2 cycles:2 method:@"LDY_immediate"];
+  [self addOpcode:0xa4 name:@"LDY" params:2 cycles:3 method:@"LDY_zeropage"];
+  [self addOpcode:0xb4 name:@"LDY" params:2 cycles:4 method:@"LDY_zeropageX"];
+  [self addOpcode:0xac name:@"LDY" params:3 cycles:4 method:@"LDY_absolute"];
+  [self addOpcode:0xbc name:@"LDY" params:3 cycles:4 method:@"LDY_absoluteX"];
+
+  /*
+   LSR  Shift One Bit Right (Memory or Accumulator)
+
+   0 -> [76543210] -> C             N Z C I D V
+                                    - + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   accumulator   LSR A         4A    1     2
+   zeropage      LSR oper      46    2     5
+   zeropage,X    LSR oper,X    56    2     6
+   absolute      LSR oper      4E    3     6
+   absolute,X    LSR oper,X    5E    3     7
+   */
+  [self addOpcode:0x4a
+             name:@"LSR"
+           params:1
+           cycles:2
+           method:@"LSR_accumulator"];
+  [self addOpcode:0x46 name:@"LSR" params:2 cycles:3 method:@"LSR_zeropage"];
+  [self addOpcode:0x56 name:@"LSR" params:2 cycles:4 method:@"LSR_zeropageX"];
+  [self addOpcode:0x4e name:@"LSR" params:3 cycles:4 method:@"LSR_absolute"];
+  [self addOpcode:0x5e name:@"LSR" params:3 cycles:4 method:@"LSR_absoluteX"];
+  /*
+   NOP  No Operation
+
+   ---                              N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       NOP           EA    1     2
+   */
+  [self addOpcode:0xea name:@"NOP" params:1 cycles:2 method:@"NOP_implied"];
+
+  /*
+   ORA  OR Memory with Accumulator
+
+   A OR M -> A                      N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   immidiate     ORA #oper     09    2     2
+   zeropage      ORA oper      05    2     3
+   zeropage,X    ORA oper,X    15    2     4
+   absolute      ORA oper      0D    3     4
+   absolute,X    ORA oper,X    1D    3     4*
+   absolute,Y    ORA oper,Y    19    3     4*
+   (indirect,X)  ORA (oper,X)  01    2     6
+   (indirect),Y  ORA (oper),Y  11    2     5*
+   */
+  [self addOpcode:0x09 name:@"ORA" params:2 cycles:2 method:@"ORA_immediate"];
+  [self addOpcode:0x05 name:@"ORA" params:2 cycles:3 method:@"ORA_zeropage"];
+  [self addOpcode:0x15 name:@"ORA" params:2 cycles:4 method:@"ORA_zeropageX"];
+  [self addOpcode:0x0D name:@"ORA" params:3 cycles:4 method:@"ORA_absolute"];
+  [self addOpcode:0x1D name:@"ORA" params:3 cycles:4 method:@"ORA_absoluteX"];
+  [self addOpcode:0x19 name:@"ORA" params:3 cycles:4 method:@"ORA_absoluteY"];
+  [self addOpcode:0x01 name:@"ORA" params:2 cycles:6 method:@"ORA_indirectX"];
+  [self addOpcode:0x11 name:@"ORA" params:2 cycles:5 method:@"ORA_indirectY"];
+
+  /*
+  PHA  Push Accumulator on Stack
+
+  push A                           N Z C I D V
+                                   - - - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       PHA           48    1     3
+  */
+  [self addOpcode:0x48 name:@"PHA" params:1 cycles:3 method:@"PHA_implied"];
+
+  /*
+
+   PHP  Push Processor Status on Stack
+
+   push SR                          N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       PHP           08    1     3
+   */
+  [self addOpcode:0x08 name:@"PHP" params:1 cycles:3 method:@"PHP_implied"];
+
+  /*
+   PLA  Pull Accumulator from Stack
+
+   pull A                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       PLA           68    1     4
+   */
+  [self addOpcode:0x68 name:@"PLA" params:1 cycles:4 method:@"PLA_implied"];
+
+  /*
+   PLP  Pull Processor Status from Stack
+
+   pull SR                          N Z C I D V
+   from stack
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       PLP           28    1     4
+   */
+  [self addOpcode:0x28 name:@"PLP" params:1 cycles:4 method:@"PLP_implied"];
+
+  /*
+  ROL  Rotate One Bit Left (Memory or Accumulator)
+
+  C <- [76543210] <- C             N Z C I D V
+                                   + + + - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  accumulator   ROL A         2A    1     2
+  zeropage      ROL oper      26    2     5
+  zeropage,X    ROL oper,X    36    2     6
+  absolute      ROL oper      2E    3     6
+  absolute,X    ROL oper,X    3E    3     7
+  */
+  [self addOpcode:0x2a
+             name:@"ROL"
+           params:1
+           cycles:2
+           method:@"ROL_accumulator"];
+  [self addOpcode:0x26 name:@"ROL" params:2 cycles:5 method:@"ROL_zeropage"];
+  [self addOpcode:0x36 name:@"ROL" params:2 cycles:6 method:@"ROL_zeropageX"];
+  [self addOpcode:0x2e name:@"ROL" params:3 cycles:6 method:@"ROL_absolute"];
+  [self addOpcode:0x3e name:@"ROL" params:3 cycles:7 method:@"ROL_absoluteX"];
+
+  /*
+   ROR  Rotate One Bit Right (Memory or Accumulator)
+
+   C -> [76543210] -> C             N Z C I D V
+                                    + + + - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   accumulator   ROR A         6A    1     2
+   zeropage      ROR oper      66    2     5
+   zeropage,X    ROR oper,X    76    2     6
+   absolute      ROR oper      6E    3     6
+   absolute,X    ROR oper,X    7E    3     7
+   */
+  [self addOpcode:0x6a
+             name:@"ROR"
+           params:1
+           cycles:2
+           method:@"ROR_accumulator"];
+  [self addOpcode:0x66 name:@"ROR" params:2 cycles:5 method:@"ROR_zeropage"];
+  [self addOpcode:0x76 name:@"ROR" params:2 cycles:6 method:@"ROR_zeropageX"];
+  [self addOpcode:0x6e name:@"ROR" params:3 cycles:6 method:@"ROR_absolute"];
+  [self addOpcode:0x7e name:@"ROR" params:3 cycles:7 method:@"ROR_absoluteX"];
+
+  /*
+  RTI  Return from Interrupt
+
+  pull SR, pull PC                 N Z C I D V
+  from stack
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       RTI           40    1     6
+  */
+  [self addOpcode:0x40 name:@"RTI" params:1 cycles:6 method:@"RTI_implied"];
+
+  /*
+  RTS  Return from Subroutine
+
+  pull PC, PC+1 -> PC              N Z C I D V
+                                   - - - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       RTS           60    1     6
+  */
+  [self addOpcode:0x60 name:@"RTS" params:1 cycles:6 method:@"RTS_implied"];
+
+  /*
+  SBC  Subtract Memory from Accumulator with Borrow
+
+  A - M - C -> A                   N Z C I D V
+                                   + + + - - +
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  immidiate     SBC #oper     E9    2     2
+  zeropage      SBC oper      E5    2     3
+  zeropage,X    SBC oper,X    F5    2     4
+  absolute      SBC oper      ED    3     4
+  absolute,X    SBC oper,X    FD    3     4*
+  absolute,Y    SBC oper,Y    F9    3     4*
+  (indirect,X)  SBC (oper,X)  E1    2     6
+  (indirect),Y  SBC (oper),Y  F1    2     5*
+  */
+  [self addOpcode:0xe9 name:@"SBC" params:2 cycles:2 method:@"SBC_immediate"];
+  [self addOpcode:0xe5 name:@"SBC" params:2 cycles:3 method:@"SBC_zeropage"];
+  [self addOpcode:0xf5 name:@"SBC" params:2 cycles:4 method:@"SBC_zeropageX"];
+  [self addOpcode:0xed name:@"SBC" params:3 cycles:4 method:@"SBC_absolute"];
+  [self addOpcode:0xfd name:@"SBC" params:3 cycles:4 method:@"SBC_absoluteX"];
+  [self addOpcode:0xf9 name:@"SBC" params:3 cycles:4 method:@"SBC_absoluteY"];
+  [self addOpcode:0xe1 name:@"SBC" params:2 cycles:6 method:@"SBC_indirectX"];
+  [self addOpcode:0xf1 name:@"SBC" params:2 cycles:5 method:@"SBC_indirectY"];
+
+  /*
+  SEC  Set Carry Flag
+
+  1 -> C                           N Z C I D V
+                                   - - 1 - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       SEC           38    1     2
+  */
+  [self addOpcode:0x38 name:@"SEC" params:1 cycles:2 method:@"SEC_implied"];
+
+  /*
+   SED  Set Decimal Flag
+
+   1 -> D                           N Z C I D V
+                                    - - - - 1 -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       SED           F8    1     2
+   */
+  [self addOpcode:0xf8 name:@"SED" params:1 cycles:2 method:@"SED_implied"];
+
+  /*
+  SEI  Set Interrupt Disable Status
+
+  1 -> I                           N Z C I D V
+                                   - - - 1 - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       SEI           78    1     2
+  */
+  [self addOpcode:0x78 name:@"SEI" params:1 cycles:2 method:@"SEI_implied"];
+
+  /*
+  STA  Store Accumulator in Memory
+
+  A -> M                           N Z C I D V
+                                   - - - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  zeropage      STA oper      85    2     3
+  zeropage,X    STA oper,X    95    2     4
+  absolute      STA oper      8D    3     4
+  absolute,X    STA oper,X    9D    3     5
+  absolute,Y    STA oper,Y    99    3     5
+  (indirect,X)  STA (oper,X)  81    2     6
+  (indirect),Y  STA (oper),Y  91    2     6
+  */
+  [self addOpcode:0x85 name:@"STA" params:2 cycles:3 method:@"STA_zeropage"];
+  [self addOpcode:0x95 name:@"STA" params:2 cycles:4 method:@"STA_zeropageX"];
+  [self addOpcode:0x8d name:@"STA" params:3 cycles:4 method:@"STA_absolute"];
+  [self addOpcode:0x9d name:@"STA" params:3 cycles:5 method:@"STA_absoluteX"];
+  [self addOpcode:0x99 name:@"STA" params:3 cycles:5 method:@"STA_absoluteY"];
+  [self addOpcode:0x81 name:@"STA" params:2 cycles:6 method:@"STA_indirectX"];
+  [self addOpcode:0x91 name:@"STA" params:2 cycles:6 method:@"STA_indirectY"];
+
+  /*
+   STX  Store Index X in Memory
+
+   X -> M                           N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   zeropage      STX oper      86    2     3
+   zeropage,Y    STX oper,Y    96    2     4
+   absolute      STX oper      8E    3     4
+  */
+  [self addOpcode:0x86 name:@"STX" params:2 cycles:3 method:@"STX_zeropage"];
+  [self addOpcode:0x96 name:@"STX" params:2 cycles:4 method:@"STX_zeropageY"];
+  [self addOpcode:0x8e name:@"STX" params:3 cycles:4 method:@"STX_absolute"];
+
+  /*
+   STY  Sore Index Y in Memory
+
+   Y -> M                           N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   zeropage      STY oper      84    2     3
+   zeropage,X    STY oper,X    94    2     4
+   absolute      STY oper      8C    3     4
+   */
+  [self addOpcode:0x84 name:@"STY" params:2 cycles:3 method:@"STY_zeropage"];
+  [self addOpcode:0x94 name:@"STY" params:2 cycles:4 method:@"STY_zeropageX"];
+  [self addOpcode:0x8c name:@"STY" params:3 cycles:4 method:@"STY_absolute"];
+
+  /*
+   TAX  Transfer Accumulator to Index X
+
+   A -> X                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       TAX           AA    1     2
+   */
+  [self addOpcode:0xaa name:@"TAX" params:1 cycles:2 method:@"TAX_implied"];
+
+  /*
+   TAY  Transfer Accumulator to Index Y
+
+   A -> Y                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       TAY           A8    1     2
+  */
+  [self addOpcode:0xa8 name:@"TAY" params:1 cycles:2 method:@"TAY_implied"];
+
+  /*
+  TSX  Transfer Stack Pointer to Index X
+
+  SP -> X                          N Z C I D V
+                                   + + - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       TSX           BA    1     2
+  */
+  [self addOpcode:0xba name:@"TSX" params:1 cycles:2 method:@"TSX_implied"];
+
+  /*
+   TXA  Transfer Index X to Accumulator
+
+   X -> A                           N Z C I D V
+                                    + + - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       TXA           8A    1     2
+  */
+  [self addOpcode:0x8a name:@"TXA" params:1 cycles:2 method:@"TXA_implied"];
+
+  /*
+   TXS  Transfer Index X to Stack Register
+
+   X -> SP                          N Z C I D V
+                                    - - - - - -
+
+   addressing    assembler    opc  bytes  cyles
+   --------------------------------------------
+   implied       TXS           9A    1     2
+   */
+  [self addOpcode:0x9a name:@"TXS" params:1 cycles:2 method:@"TXS_implied"];
+
+  /*
+  TYA  Transfer Index Y to Accumulator
+
+  Y -> A                           N Z C I D V
+                                   + + - - - -
+
+  addressing    assembler    opc  bytes  cyles
+  --------------------------------------------
+  implied       TYA           98    1     2
+  */
+  [self addOpcode:0x98 name:@"TYA" params:1 cycles:2 method:@"TYA_implied"];
+
+  // [self generateMethods];  /* Used to generate the method calls for each
+  // instruction */
+  NSLog (@"####### Finished");
+}
+
++ (void)initialize
+{
+  [self buildInstructionMap];
+}
+
+- (id)initWithSize:(NSUInteger)size
+{
+#if defined(CPU6502_STANDALONE)
+  CPU6502FlatMemory *memory = [[CPU6502FlatMemory alloc] initWithSize:size];
+  self = [self initWithBus:memory];
+  [memory release];
+  return self;
+#else
+  if (([super init]) != nil)
+    {
+      ram = [[RAM alloc] initWithSize:size];
+      bus = [ram retain];
+      debug = NO;
+      sp = 0xFF;
+      s.status.unused = 1;
+    }
+  return self;
+#endif
+}
+
+- (id)initWithBus:(id<CPU6502Bus>)addressBus
+{
+  NSParameterAssert (addressBus != nil);
+  if ((self = [super init]) != nil)
+    {
+      bus = [addressBus retain];
+      debug = NO;
+      sp = 0xFF;
+      s.status.unused = 1;
+    }
+  return self;
+}
+
+- (void)debugLogWithFormat:(NSString *)formatString, ...
+{
+  if (debug)
+    {
+      NSString *contents = nil;
+      va_list args;
+      va_start (args, formatString);
+      contents = [[NSString alloc] initWithFormat:formatString arguments:args];
+      NSLog (@"%@", contents);
+      va_end (args);
+    }
+}
+
+- (void)reset
+{
+  // Initialize registers...
+  a = 0x00;
+  x = 0x00;
+  y = 0x00;
+
+  // Load PC from reset vector at 0xFFFC-0xFFFD
+  uint8 pcl = [self readMemory:RESETVECTOR];
+  uint8 pch = [self readMemory:RESETVECTOR + 1];
+  pc = ((uint16)pch << 8) | pcl;
+
+  // Initialize stack pointer to 0xFF (top of stack)
+  sp = 0xFF;
+
+  // Initialize flags...
+  s.status.n = 0;
+  s.status.v = 0;
+  s.status.b = 0;
+  s.status.d = 0;
+  s.status.i = 1; // Interrupts disabled after reset
+  s.status.z = 0;
+  s.status.c = 0;
+  s.status.unused = 1; // Bit 5 is always 1
+
+  // Character ROM contents survive reset; do not replace a loaded ROM here.
+}
+
+#if !defined(CPU6502_STANDALONE)
+- (void)resetVIC20System
+{
+  // Reset the machine's chips while preserving ROM selection and mounted
+  // media. Recreate the keyboard matrix so no host key remains held.
+  [datasette stop];
+  [vic reset];
+  [via1 reset];
+  [via2 reset];
+  [memoryManager reset];
+  [keyboard release];
+  keyboard = [[KeyboardMatrix alloc] initWithVIA1:via1 VIA2:via2];
+  [memoryManager setKeyboard:keyboard];
+  if (fallbackROMActive)
+    [fallbackBASIC reset];
+  [self reset];
+}
+#endif
+
+- (void)interrupt
+{
+  if (s.status.i)
+    return;
+  [self push:(pc >> 8) & 0xff];
+  [self push:pc & 0xff];
+  [self push:(s.sr & ~0x10) | 0x20];
+  s.status.i = 1;
+  pc = (uint16)[self readMemory:IRQVECTOR]
+       | ((uint16)[self readMemory:IRQVECTOR + 1] << 8);
+  for (NSUInteger i = 0; i < 7; i++)
+    [self tick];
+}
+
+- (void)fetch
+{
+  uint8 opcode = [self readMemory:pc];
+  [currentInstruction release];
+  currentInstruction = [[NSNumber alloc] initWithUnsignedChar:opcode];
+  // PC will be incremented by execute methods as needed
+}
+
+- (void)runAtLocation:(uint16)loc
+{
+  // return;
+  pc = loc;
+  [self fetch];
+  [self debugLogWithFormat:@"=== Program execution start"];
+  while ([currentInstruction integerValue] != 0x00)
+    {
+      [self execute];
+    }
+  [self state];
+  [self debugLogWithFormat:@"=== Execution halted"];
+}
+
+- (void)run
+{
+  [self runAtLocation:0];
+}
+
+- (void)step
+{
+  // This method is now used for single-step debugging
+  [self execute];
+}
+
+- (void)tick
+{
+  cycles++;
+
+#if !defined(CPU6502_STANDALONE)
+  // Tick all chips for synchronized timing
+  if (vic)
+    {
+      [vic tick];
+    }
+
+  if (via1)
+    {
+      [via1 tick];
+    }
+
+  if (via2)
+    {
+      [via2 tick];
+    }
+  if (datasette)
+    {
+      [datasette tick];
+    }
+#endif
+}
+
+- (void)state
+{
+  NSLog (@"A = %02x, X = %02x, Y = %02x, PC = %04x, SP = %02x", a, x, y, pc,
+         sp);
+  NSLog (@"N\tV\tB\tD\tI\tZ\tC");
+  NSLog (@"%1d\t%1d\t%1d\t%1d\t%1d\t%1d\t%1d", s.status.n, s.status.v,
+         s.status.b, s.status.d, s.status.i, s.status.z, s.status.c);
+
+  if (debug)
+    {
+#if !defined(CPU6502_STANDALONE)
+      if (vic)
+        {
+          NSLog (@"%@", [vic getRegisterStatus]);
+        }
+      if (via1)
+        {
+          NSLog (@"%@", [via1 getRegisterStatus]);
+        }
+      if (via2)
+        {
+          NSLog (@"%@", [via2 getRegisterStatus]);
+        }
+      if (keyboard)
+        {
+          NSLog (@"%@", [keyboard getMatrixStatus]);
+        }
+      if (memoryManager)
+        {
+          NSLog (@"%@", [memoryManager getMemoryMapStatus]);
+        }
+#endif
+    }
+}
+
+// Instruction interpretation....
+- (void)execute
+{
+#if !defined(CPU6502_STANDALONE)
+  if (fallbackROMActive && pc == 0xE100)
+    {
+      [fallbackBASIC tick];
+      for (NSUInteger i = 0; i < 100; i++)
+        [self tick];
+      return;
+    }
+  if ([self handleKernalDiskTrap])
+    return;
+#endif
+  [self fetch];
+  [self executeOperation:currentInstruction];
+}
+
+- (void)executeAtLocation:(uint16)loc
+{
+  pc = loc;
+  [self execute];
+}
+
+- (void)executeOperation:(NSNumber *)operation
+{
+  NSUInteger instructionCycles =
+      [self executeOpcode:(uint8)[operation unsignedCharValue]];
+  for (NSUInteger i = 0; i < instructionCycles; i++)
+    [self tick];
+}
+
+// Load
+- (void)loadProgramFile:(NSString *)fileName atLocation:(uint16)loc
+{
+  NSData *data = [NSData dataWithContentsOfFile:fileName];
+  const uint8 *bytes = [data bytes];
+  for (NSUInteger i = 0; i < [data length]; i++)
+    [self writeMemory:bytes[i] address:(uint16)(loc + i)];
+}
+
+- (void)setProgramCounter:(uint16)address
+{
+  pc = address;
+}
+
+- (uint16)getProgramCounter
+{
+  return pc;
+}
+- (uint8)getAccumulator
+{
+  return a;
+}
+- (uint8)getXRegister
+{
+  return x;
+}
+- (uint8)getYRegister
+{
+  return y;
+}
+- (uint8)getStackPointer
+{
+  return sp;
+}
+- (uint8)getStatusRegister
+{
+  return s.sr | 0x20;
+}
+- (NSString *)getCurrentInstructionDescription
+{
+  uint8 opcode = [self readMemory:pc];
+  NSDictionary *instruction =
+      [instructionMap objectForKey:[NSNumber numberWithUnsignedChar:opcode]];
+  if (!instruction)
+    return
+        [NSString stringWithFormat:@"PC $%04X  Bytes %02X        Opcode ???",
+                                   pc, opcode];
+
+  NSUInteger length =
+      [[instruction objectForKey:@"parameters"] unsignedIntegerValue];
+  NSMutableString *bytes = [NSMutableString stringWithFormat:@"%02X", opcode];
+  for (NSUInteger offset = 1; offset < length; offset++)
+    [bytes appendFormat:@" %02X", [self readMemory:(uint16)(pc + offset)]];
+
+  NSString *fixedBytes = [bytes stringByPaddingToLength:8
+                                             withString:@" "
+                                        startingAtIndex:0];
+  return [NSString stringWithFormat:@"PC $%04X  Bytes %@  Opcode %@", pc,
+                                    fixedBytes,
+                                    [instruction objectForKey:@"name"]];
+}
+- (NSUInteger)getCycleCount
+{
+  return cycles;
+}
+
+#if !defined(CPU6502_STANDALONE)
+- (void)returnFromKernalTrap
+{
+  uint8 low = [self pop];
+  uint8 high = [self pop];
+  pc = (uint16)(((uint16)high << 8) | low) + 1;
+  for (NSUInteger i = 0; i < 12; i++)
+    [self tick];
+}
+
+- (BOOL)handleKernalDiskTrap
+{
+  // Let the KERNAL execute SETNAM and SETLFS normally. This is important for
+  // tape and other devices; the drive shortcut applies only at LOAD on unit 8.
+  uint8 device = [self readMemory:0x00BA];
+  if (pc != 0xFFD5 || device != 8 || ![diskDrive isDiskAttached])
+    return NO;
+
+  uint8 nameLength = [self readMemory:0x00B7];
+  uint16 nameAddress = (uint16)[self readMemory:0x00BB]
+                       | ((uint16)[self readMemory:0x00BC] << 8);
+  NSMutableData *nameData = [NSMutableData dataWithLength:nameLength];
+  uint8 *nameBytes = [nameData mutableBytes];
+  for (NSUInteger i = 0; i < nameLength; i++)
+    nameBytes[i] = [self readMemory:(uint16)(nameAddress + i)];
+  NSString *name =
+      [[[NSString alloc] initWithData:nameData
+                             encoding:NSISOLatin1StringEncoding] autorelease];
+  if (!name)
+    name = @"";
+  NSError *error = nil;
+  NSData *program = [diskDrive loadFileNamed:name error:&error];
+  if (!program || [program length] < 2)
+    {
+      a = 4; // KERNAL: FILE NOT FOUND
+      s.status.c = 1;
+      [self returnFromKernalTrap];
+      return YES;
+    }
+  const uint8 *bytes = [program bytes];
+  uint8 secondaryAddress = [self readMemory:0x00B9];
+  uint16 address = secondaryAddress == 0
+                       ? ((uint16)bytes[0] | ((uint16)bytes[1] << 8))
+                       : ((uint16)x | ((uint16)y << 8));
+  for (NSUInteger i = 2; i < [program length]; i++)
+    [self writeMemory:bytes[i] address:address++];
+  x = address & 0xFF;
+  y = address >> 8;
+  a = 0;
+  s.status.c = 0;
+  [self returnFromKernalTrap];
+  return YES;
+}
+#endif
+
+- (void)setDebug:(BOOL)enabled
+{
+  debug = enabled;
+}
+
+// Stack
+- (void)push:(uint8)value
+{
+  [self writeMemory:value address:(STACKBASE + sp)];
+  if (sp == 0x00)
+    {
+      sp = 0xFF;
+    }
+  else
+    {
+      sp--;
+    }
+}
+
+- (uint8)pop
+{
+  if (sp == 0xFF)
+    {
+      sp = 0x00;
+    }
+  else
+    {
+      sp++;
+    }
+  return [self readMemory:(STACKBASE + sp)];
+}
+
+// Helper methods for flag calculations
+- (void)updateNZFlags:(uint8)value
+{
+  s.status.n = (value & 0x80) ? 1 : 0;
+  s.status.z = (value == 0) ? 1 : 0;
+}
+
+- (void)setCarryFlag:(BOOL)carry
+{
+  s.status.c = carry ? 1 : 0;
+}
+
+- (void)setOverflowFlag:(BOOL)overflow
+{
+  s.status.v = overflow ? 1 : 0;
+}
+
+- (void)dealloc
+{
+  [currentInstruction release];
+#if !defined(CPU6502_STANDALONE)
+  [fallbackBASIC release];
+  [diskDrive release];
+  [datasette release];
+  [memoryManager release];
+  [keyboard release];
+  [via2 release];
+  [via1 release];
+  [vic release];
+#endif
+  [bus release];
+  [(id)ram release];
+  [super dealloc];
+}
+
+#pragma mark - Memory Access with VIC Integration
+
+- (uint8)readMemory:(uint16)address
+{
+#if !defined(CPU6502_STANDALONE)
+  if (memoryManager)
+    {
+      return [memoryManager readMemory:address];
+    }
+#endif
+
+  if (bus)
+    return [bus readMemory:address];
+
+#if !defined(CPU6502_STANDALONE)
+  // Fallback to old VIC integration for backward compatibility
+  // VIC-20 Memory Map:
+  // 0x9000-0x900F: VIC registers
+  // 0x9110-0x911F: VIA#1 registers
+  // 0x9120-0x912F: VIA#2 registers
+  // Other addresses: RAM/ROM
+
+  if (address >= 0x9000 && address <= 0x900F)
+    {
+      // VIC register access
+      return [vic readVICRegister:address];
+    }
+
+  if (address >= 0x9110 && address <= 0x911F && via1)
+    {
+      // VIA1 register access
+      return [via1 readRegister:(address - 0x9110)];
+    }
+
+  if (address >= 0x9120 && address <= 0x912F && via2)
+    {
+      // VIA2 register access
+      return [via2 readRegister:(address - 0x9120)];
+    }
+
+  // Default to RAM access
+  return [ram read:address];
+#else
+  return 0xFF;
+#endif
+}
+
+- (void)writeMemory:(uint8)value address:(uint16)address
+{
+#if !defined(CPU6502_STANDALONE)
+  if (memoryManager)
+    {
+      [memoryManager writeMemory:value address:address];
+      if (ram && (address < 0x8000 || (address >= 0x9400 && address < 0x9800)))
+        {
+          [ram write:value loc:address];
+        }
+      return;
+    }
+#endif
+
+  if (bus)
+    {
+      [bus writeMemory:value address:address];
+      return;
+    }
+
+#if !defined(CPU6502_STANDALONE)
+  // Fallback to old VIC integration for backward compatibility
+  if (address >= 0x9000 && address <= 0x900F)
+    {
+      // VIC register access
+      [vic writeVICRegister:address value:value];
+      return;
+    }
+
+  if (address >= 0x9110 && address <= 0x911F && via1)
+    {
+      // VIA1 register access
+      [via1 writeRegister:(address - 0x9110) value:value];
+      return;
+    }
+
+  if (address >= 0x9120 && address <= 0x912F && via2)
+    {
+      // VIA2 register access
+      [via2 writeRegister:(address - 0x9120) value:value];
+      return;
+    }
+
+  // Default to RAM access
+  [ram write:value loc:address];
+#endif
+}
+
+- (void)writeMemory:(uint8)value loc:(uint16)address
+{
+  [self writeMemory:value address:address];
+}
+
+#if !defined(CPU6502_STANDALONE)
+#pragma mark - Component Access
+
+- (VIC6561 *)getVIC
+{
+  return vic;
+}
+
+- (VIA6522 *)getVIA1
+{
+  return via1;
+}
+
+- (VIA6522 *)getVIA2
+{
+  return via2;
+}
+
+- (KeyboardMatrix *)getKeyboard
+{
+  return keyboard;
+}
+
+- (VIC20MemoryManager *)getMemoryManager
+{
+  return memoryManager;
+}
+
+- (Datasette *)getDatasette
+{
+  return datasette;
+}
+
+- (DiskDrive *)getDiskDrive
+{
+  return diskDrive;
+}
+
+#pragma mark - System Control
+
+- (void)loadROMs:(NSString *)romPath
+{
+  fallbackROMActive = NO;
+  if (!memoryManager)
+    {
+      NSLog (@"Error: Memory manager not initialized");
+      return;
+    }
+
+  NSString *basicROMPath =
+      [romPath stringByAppendingPathComponent:@"basic.rom"];
+  NSString *kernalROMPath =
+      [romPath stringByAppendingPathComponent:@"kernal.rom"];
+  NSString *charROMPath =
+      [romPath stringByAppendingPathComponent:@"characters.rom"];
+
+  // Load BASIC ROM
+  NSData *basicROM = [NSData dataWithContentsOfFile:basicROMPath];
+  if (basicROM)
+    {
+      [memoryManager loadBasicROM:basicROM];
+      [ram write:basicROM atLocation:VIC20_BASIC_ROM_BASE];
+      NSLog (@"Loaded BASIC ROM: %@ (%luKB)", basicROMPath,
+             (unsigned long)[basicROM length] / 1024);
+    }
+  else
+    {
+      NSLog (@"Warning: Could not load BASIC ROM from %@", basicROMPath);
+    }
+
+  // Load KERNAL ROM
+  NSData *kernalROM = [NSData dataWithContentsOfFile:kernalROMPath];
+  if (kernalROM)
+    {
+      [memoryManager loadKernalROM:kernalROM];
+      [ram write:kernalROM atLocation:VIC20_KERNAL_ROM_BASE];
+      NSLog (@"Loaded KERNAL ROM: %@ (%luKB)", kernalROMPath,
+             (unsigned long)[kernalROM length] / 1024);
+    }
+  else
+    {
+      NSLog (@"Warning: Could not load KERNAL ROM from %@", kernalROMPath);
+    }
+
+  // Load Character ROM
+  NSData *charROM = [NSData dataWithContentsOfFile:charROMPath];
+  if (charROM)
+    {
+      [memoryManager loadCharacterROM:charROM];
+      [ram write:charROM atLocation:VIC20_CHAR_ROM_BASE];
+      NSLog (@"Loaded Character ROM: %@ (%luKB)", charROMPath,
+             (unsigned long)[charROM length] / 1024);
+    }
+  else
+    {
+      NSLog (@"Warning: Could not load Character ROM from %@", charROMPath);
+      // Load default character set
+      if (vic)
+        {
+          [vic loadDefaultCharacterSet];
+          NSLog (@"Loaded default character set");
+        }
+    }
+}
+
+- (BOOL)loadFallbackROMs
+{
+  NSData *basic = [FallbackROMs basicROM];
+  NSData *kernal = [FallbackROMs kernalROM];
+  NSData *characters = [FallbackROMs characterROM];
+  BOOL loaded = [memoryManager loadBasicROM:basic] &&
+                [memoryManager loadKernalROM:kernal] &&
+                [memoryManager loadCharacterROM:characters];
+  if (loaded)
+    {
+      fallbackROMActive = YES;
+      fallbackBASIC = [[FallbackBASIC alloc] initWithCPU:self];
+      [ram write:basic atLocation:VIC20_BASIC_ROM_BASE];
+      [ram write:kernal atLocation:VIC20_KERNAL_ROM_BASE];
+      [ram write:characters atLocation:VIC20_CHAR_ROM_BASE];
+      NSLog (@"Loaded cleanroom fallback ROM set");
+    }
+  return loaded;
+}
+
+- (void)enqueueFallbackCharacter:(unichar)character
+{
+  [fallbackBASIC enqueueCharacter:character];
+}
+
+- (BOOL)insertCartridge:(NSData *)cartridgeData
+{
+  if (!memoryManager)
+    {
+      return NO;
+    }
+
+  // Auto-detect cartridge type based on size
+  VIC20CartridgeType cartType = VIC20_CARTRIDGE_NONE;
+  NSUInteger dataSize = [cartridgeData length];
+
+  if (dataSize == 0x1000)
+    { // 4KB
+      cartType = VIC20_CARTRIDGE_4K;
+    }
+  else if (dataSize == 0x2000)
+    { // 8KB
+      cartType = VIC20_CARTRIDGE_8K;
+    }
+  else if (dataSize == 0x4000)
+    { // 16KB
+      cartType = VIC20_CARTRIDGE_16K;
+    }
+  else
+    {
+      NSLog (@"Error: Unsupported cartridge size: %luKB",
+             (unsigned long)(dataSize / 1024));
+      return NO;
+    }
+
+  BOOL success = [memoryManager insertCartridge:cartridgeData type:cartType];
+  if (success)
+    {
+      NSLog (@"Inserted cartridge: Type %d, Size %luKB", cartType,
+             (unsigned long)(dataSize / 1024));
+    }
+
+  return success;
+}
+
+- (void)removeCartridge
+{
+  [memoryManager removeCartridge];
+}
+
+- (void)configureMemoryExpansion:(BOOL)enable3K
+                       enable8K1:(BOOL)enable8K1
+                       enable8K2:(BOOL)enable8K2
+{
+  if (!memoryManager)
+    {
+      return;
+    }
+
+  VIC20MemoryConfig config = [memoryManager getMemoryConfiguration];
+  config.expansion_3K = enable3K;
+  config.expansion_8K_1 = enable8K1;
+  config.expansion_8K_2 = enable8K2;
+
+  [memoryManager setMemoryConfiguration:config];
+
+  NSLog (@"Memory expansion configured: 3K=%s, 8K1=%s, 8K2=%s",
+         enable3K ? "On" : "Off", enable8K1 ? "On" : "Off",
+         enable8K2 ? "On" : "Off");
+  NSLog (@"Total RAM: %luKB",
+         (unsigned long)([memoryManager getTotalRAMSize] / 1024));
+}
+
+- (id)initVIC20System
+{
+  if (!ram)
+    {
+      ram = [[RAM alloc] initWithSize:64 * 1024];
+    }
+  vic = [[VIC6561 alloc] initWithRAM:ram];
+  via1 = [[VIA6522 alloc] initWithCPU:self name:@"VIA1"];
+  via2 = [[VIA6522 alloc] initWithCPU:self name:@"VIA2"];
+  keyboard = [[KeyboardMatrix alloc] initWithVIA1:via1 VIA2:via2];
+  memoryManager = [[VIC20MemoryManager alloc] initWithVIC:vic
+                                                     VIA1:via1
+                                                     VIA2:via2];
+  [bus release];
+  bus = [memoryManager retain];
+  datasette = [[Datasette alloc] initWithVIA1:via1 VIA2:via2 VIC:vic];
+  diskDrive = [[DiskDrive alloc] init];
+  [memoryManager setKeyboard:keyboard];
+  [vic loadDefaultCharacterSet];
+  [self reset];
+  return self;
+}
+
+- (id)initWithRAM:(RAM *)memory VIC:(VIC6561 *)vicChip
+{
+  if ((self = [super init]) != nil)
+    {
+      ram = [memory retain];
+      bus = [ram retain];
+      vic = [vicChip retain];
+      debug = NO;
+      sp = 0xFF;
+      s.status.unused = 1;
+    }
+  return self;
+}
+
+#endif /* !CPU6502_STANDALONE */
+
+@end
