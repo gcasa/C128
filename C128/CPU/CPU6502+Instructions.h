@@ -22,10 +22,15 @@
 #import "CPU6502.h"
 
 /**
- * CPU6502 provides the cpu6502 services used by the VIC-20 emulator.
+ * Instruction decoder shared by the standalone and original VIC-20 CPU builds.
  */
 @interface CPU6502 (Instructions)
-/** Performs the execute opcode operation. */
+/**
+ * Executes opcode at the current program counter, updating registers and bus
+ * memory. Returns the instruction cycle count, including implemented
+ * branch/page-cross penalties; the caller advances clocks. Undocumented opcodes
+ * have only partial support.
+ */
 - (NSUInteger)executeOpcode:(uint8)opcode;
 
 @end

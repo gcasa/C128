@@ -18,10 +18,11 @@
 
 #import "CPU6502+Instructions.h"
 
-// http://nparker.llx.com/a2/opcodes.html
+/* http://nparker.llx.com/a2/opcodes.html */
 
 @implementation CPU6502 (Instructions)
-// Instruction implementations...
+
+/* Instruction implementations... */
 /*
  *  add 1 to cycles if page boundery is crossed
 
@@ -64,15 +65,15 @@
 
   uint16 result = (uint16)a + (uint16)operand + (uint16)s.status.c;
 
-  // Set overflow flag: (A^result) & (operand^result) & 0x80
+  /* Set overflow flag: (A^result) & (operand^result) & 0x80 */
   s.status.v = ((a ^ result) & (operand ^ result) & 0x80) ? 1 : 0;
 
-  // Set carry flag if result > 255
+  /* Set carry flag if result > 255 */
   s.status.c = (result > 0xFF) ? 1 : 0;
 
   a = result & 0xFF;
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
 }
@@ -88,15 +89,15 @@
 
   uint16 result = (uint16)a + (uint16)operand + (uint16)s.status.c;
 
-  // Set overflow flag: (A^result) & (operand^result) & 0x80
+  /* Set overflow flag: (A^result) & (operand^result) & 0x80 */
   s.status.v = ((a ^ result) & (operand ^ result) & 0x80) ? 1 : 0;
 
-  // Set carry flag if result > 255
+  /* Set carry flag if result > 255 */
   s.status.c = (result > 0xFF) ? 1 : 0;
 
   a = result & 0xFF;
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
 }
@@ -108,20 +109,20 @@
   uint8 address = [self readMemory:pc];
   pc++;
   uint8 operand =
-      [self readMemory:(address + x) & 0xFF]; // Zero page wraps around
+      [self readMemory:(address + x) & 0xFF]; /* Zero page wraps around */
   [self debugLogWithFormat:@"ADC $%02X,X", address];
 
   uint16 result = (uint16)a + (uint16)operand + (uint16)s.status.c;
 
-  // Set overflow flag: (A^result) & (operand^result) & 0x80
+  /* Set overflow flag: (A^result) & (operand^result) & 0x80 */
   s.status.v = ((a ^ result) & (operand ^ result) & 0x80) ? 1 : 0;
 
-  // Set carry flag if result > 255
+  /* Set carry flag if result > 255 */
   s.status.c = (result > 0xFF) ? 1 : 0;
 
   a = result & 0xFF;
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
 }
@@ -199,12 +200,12 @@
   uint8 zpAddr = [self readMemory:pc];
   pc++;
 
-  // Read 16-bit address from zero page
+  /* Read 16-bit address from zero page */
   uint8 addrLo = [self readMemory:zpAddr];
-  uint8 addrHi = [self readMemory:(zpAddr + 1) & 0xFF]; // Zero page wraps
+  uint8 addrHi = [self readMemory:(zpAddr + 1) & 0xFF]; /* Zero page wraps */
   uint16 baseAddr = ((uint16)addrHi << 8) | addrLo;
 
-  // Add Y to the address
+  /* Add Y to the address */
   uint16 finalAddr = baseAddr + y;
   uint8 operand = [self readMemory:finalAddr];
 
@@ -212,15 +213,15 @@
 
   uint16 result = (uint16)a + (uint16)operand + (uint16)s.status.c;
 
-  // Set overflow flag: (A^result) & (operand^result) & 0x80
+  /* Set overflow flag: (A^result) & (operand^result) & 0x80 */
   s.status.v = ((a ^ result) & (operand ^ result) & 0x80) ? 1 : 0;
 
-  // Set carry flag if result > 255
+  /* Set carry flag if result > 255 */
   s.status.c = (result > 0xFF) ? 1 : 0;
 
   a = result & 0xFF;
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
 }
@@ -253,10 +254,10 @@
 
   a = a & operand;
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
-  // Carry flag is not affected by AND
+  /* Carry flag is not affected by AND */
 }
 
 /* Implementation of AND */
@@ -333,6 +334,7 @@
   s.status.n = (a & 0x80) != 0;
   s.status.z = !(a);
 }
+
 /* Implementation of AND */
 - (void)AND_indirectX
 {
@@ -479,16 +481,16 @@
 {
   pc++;
   int8_t offset = (int8_t)[self readMemory:pc];
-  pc++; // Move past the offset byte
+  pc++; /* Move past the offset byte */
 
   [self debugLogWithFormat:@"BEQ $%02X (offset: %d)", pc + offset, offset];
 
   if (s.status.z)
     {
-      pc += offset; // Branch taken
-                    // TODO: Add cycle penalty for page crossing
+      pc += offset; /* Branch taken */
+                    /* TODO: Add cycle penalty for page crossing */
     }
-  // If branch not taken, PC is already at next instruction
+  /* If branch not taken, PC is already at next instruction */
 }
 
 /*
@@ -513,8 +515,8 @@
   uint8 param1 = [self readMemory:pc];
   uint8 val = [self readMemory:param1];
   [self debugLogWithFormat:@"param = %X", param1];
-  uint8 m6 = val & 0x40; // bit 6
-  uint8 m7 = val & 0x80; // bit 7
+  uint8 m6 = val & 0x40; /* bit 6 */
+  uint8 m7 = val & 0x80; /* bit 7 */
   a = a & val;
   s.status.z = !(a);
   s.status.n = m7;
@@ -534,8 +536,8 @@
   uint16 addr = ((uint16)param2 << 8) + (uint16)param1;
   uint8 val = [self readMemory:addr];
   [self debugLogWithFormat:@"param = %X", param1];
-  uint8 m6 = val & 0x40; // bit 6
-  uint8 m7 = val & 0x80; // bit 7
+  uint8 m6 = val & 0x40; /* bit 6 */
+  uint8 m7 = val & 0x80; /* bit 7 */
   a = a & val;
   s.status.z = !(a);
   s.status.n = m7;
@@ -1401,7 +1403,7 @@
   [self debugLogWithFormat:@"JMP $%04X", jumpAddr];
 
   pc = jumpAddr;
-  // JMP does not affect any flags
+  /* JMP does not affect any flags */
 }
 
 /* Implementation of JMP */
@@ -1418,8 +1420,8 @@
   [self debugLogWithFormat:@"addr = %X", addr];
   uint8 p1 = [self readMemory:addr];
   uint8 p2 = [self readMemory:addr + 1];
-  uint16 naddr = ((uint16)p2 << 8) + (uint16)p1; // indirect address...
-  pc = naddr;                                    // Set new location.
+  uint16 naddr = ((uint16)p2 << 8) + (uint16)p1; /* indirect address... */
+  pc = naddr;                                    /* Set new location. */
 }
 
 /*
@@ -1446,7 +1448,7 @@
   [self push:(pc >> 8) & 0xff];
   [self push:(pc & 0xff)];
   [self debugLogWithFormat:@"JSR $%04X", addr];
-  pc = addr; // Set new location.
+  pc = addr; /* Set new location. */
 }
 
 /*
@@ -1476,7 +1478,7 @@
 
   [self debugLogWithFormat:@"LDA #$%02X", a];
 
-  // Update N and Z flags
+  /* Update N and Z flags */
   s.status.n = (a & 0x80) ? 1 : 0;
   s.status.z = (a == 0) ? 1 : 0;
 }
@@ -1831,7 +1833,7 @@
 /* Implementation of NOP */
 - (void)NOP_implied
 {
-  [self debugLogWithFormat:@"NOP"]; // literally does nothing...
+  [self debugLogWithFormat:@"NOP"]; /* literally does nothing... */
 }
 
 /*
@@ -2492,7 +2494,7 @@
 
   [self writeMemory:a address:address];
   [self debugLogWithFormat:@"STA $%02X", address];
-  // STA does not affect any flags
+  /* STA does not affect any flags */
 }
 
 /* Implementation of STA */
@@ -2659,9 +2661,9 @@
   [self debugLogWithFormat:@"TAX"];
   x = a;
 
-  // Update N and Z flags based on the result
-  s.status.n = (x & 0x80) ? 1 : 0; // Set N flag if bit 7 is set
-  s.status.z = (x == 0) ? 1 : 0;   // Set Z flag if result is zero
+  /* Update N and Z flags based on the result */
+  s.status.n = (x & 0x80) ? 1 : 0; /* Set N flag if bit 7 is set */
+  s.status.z = (x == 0) ? 1 : 0;   /* Set Z flag if result is zero */
 }
 
 /*
@@ -2680,9 +2682,9 @@
   [self debugLogWithFormat:@"TAY"];
   y = a;
 
-  // Update N and Z flags based on the result
-  s.status.n = (y & 0x80) ? 1 : 0; // Set N flag if bit 7 is set
-  s.status.z = (y == 0) ? 1 : 0;   // Set Z flag if result is zero
+  /* Update N and Z flags based on the result */
+  s.status.n = (y & 0x80) ? 1 : 0; /* Set N flag if bit 7 is set */
+  s.status.z = (y == 0) ? 1 : 0;   /* Set Z flag if result is zero */
 }
 
 /*
@@ -2701,9 +2703,9 @@
   [self debugLogWithFormat:@"TSX"];
   x = sp;
 
-  // Update N and Z flags based on the result
-  s.status.n = (x & 0x80) ? 1 : 0; // Set N flag if bit 7 is set
-  s.status.z = (x == 0) ? 1 : 0;   // Set Z flag if result is zero
+  /* Update N and Z flags based on the result */
+  s.status.n = (x & 0x80) ? 1 : 0; /* Set N flag if bit 7 is set */
+  s.status.z = (x == 0) ? 1 : 0;   /* Set Z flag if result is zero */
 }
 
 /*
@@ -2722,9 +2724,9 @@
   [self debugLogWithFormat:@"TXA"];
   a = x;
 
-  // Update N and Z flags based on the result
-  s.status.n = (a & 0x80) ? 1 : 0; // Set N flag if bit 7 is set
-  s.status.z = (a == 0) ? 1 : 0;   // Set Z flag if result is zero
+  /* Update N and Z flags based on the result */
+  s.status.n = (a & 0x80) ? 1 : 0; /* Set N flag if bit 7 is set */
+  s.status.z = (a == 0) ? 1 : 0;   /* Set Z flag if result is zero */
 }
 
 /*
@@ -2758,11 +2760,11 @@
 - (void)TYA_implied
 {
   [self debugLogWithFormat:@"TYA"];
-  a = y; // Transfer Y to A, not A to Y
+  a = y; /* Transfer Y to A, not A to Y */
 
-  // Update N and Z flags based on the result
-  s.status.n = (a & 0x80) ? 1 : 0; // Set N flag if bit 7 is set
-  s.status.z = (a == 0) ? 1 : 0;   // Set Z flag if result is zero
+  /* Update N and Z flags based on the result */
+  s.status.n = (a & 0x80) ? 1 : 0; /* Set N flag if bit 7 is set */
+  s.status.z = (a == 0) ? 1 : 0;   /* Set Z flag if result is zero */
 }
 
 /*
@@ -2779,107 +2781,107 @@
   NSUInteger used = 2;
 
 #define FETCH8() ([self readMemory:pc++])
-#define FETCH16()                                                             \
-  ({                                                                          \
-    uint8 _l = FETCH8 ();                                                     \
-    uint8 _h = FETCH8 ();                                                     \
-    (uint16) (_l | ((uint16)_h << 8));                                        \
+#define FETCH16()                                                              \
+  ({                                                                           \
+    uint8 _l = FETCH8 ();                                                      \
+    uint8 _h = FETCH8 ();                                                      \
+    (uint16) (_l | ((uint16)_h << 8));                                         \
   })
 #define ZPX() ((uint8)(FETCH8 () + x))
 #define ZPY() ((uint8)(FETCH8 () + y))
-#define INDX()                                                                \
-  ({                                                                          \
-    uint8 _p = (uint8)(FETCH8 () + x);                                        \
-    (uint16) ([self readMemory:_p]                                            \
-              | ((uint16)[self readMemory:(uint8)(_p + 1)] << 8));            \
+#define INDX()                                                                 \
+  ({                                                                           \
+    uint8 _p = (uint8)(FETCH8 () + x);                                         \
+    (uint16) ([self readMemory:_p]                                             \
+              | ((uint16)[self readMemory:(uint8)(_p + 1)] << 8));             \
   })
-#define INDY()                                                                \
-  ({                                                                          \
-    uint8 _p = FETCH8 ();                                                     \
-    uint16 _b = (uint16)([self readMemory:_p]                                 \
-                         | ((uint16)[self readMemory:(uint8)(_p + 1)] << 8)); \
-    base = _b;                                                                \
-    address = (uint16)(_b + y);                                               \
-    crossed = ((_b ^ address) & 0xff00) != 0;                                 \
-    address;                                                                  \
+#define INDY()                                                                 \
+  ({                                                                           \
+    uint8 _p = FETCH8 ();                                                      \
+    uint16 _b = (uint16)([self readMemory:_p]                                  \
+                         | ((uint16)[self readMemory:(uint8)(_p + 1)] << 8));  \
+    base = _b;                                                                 \
+    address = (uint16)(_b + y);                                                \
+    crossed = ((_b ^ address) & 0xff00) != 0;                                  \
+    address;                                                                   \
   })
-#define ABSX()                                                                \
-  ({                                                                          \
-    uint16 _b = FETCH16 ();                                                   \
-    base = _b;                                                                \
-    address = (uint16)(_b + x);                                               \
-    crossed = ((_b ^ address) & 0xff00) != 0;                                 \
-    address;                                                                  \
+#define ABSX()                                                                 \
+  ({                                                                           \
+    uint16 _b = FETCH16 ();                                                    \
+    base = _b;                                                                 \
+    address = (uint16)(_b + x);                                                \
+    crossed = ((_b ^ address) & 0xff00) != 0;                                  \
+    address;                                                                   \
   })
-#define ABSY()                                                                \
-  ({                                                                          \
-    uint16 _b = FETCH16 ();                                                   \
-    base = _b;                                                                \
-    address = (uint16)(_b + y);                                               \
-    crossed = ((_b ^ address) & 0xff00) != 0;                                 \
-    address;                                                                  \
+#define ABSY()                                                                 \
+  ({                                                                           \
+    uint16 _b = FETCH16 ();                                                    \
+    base = _b;                                                                 \
+    address = (uint16)(_b + y);                                                \
+    crossed = ((_b ^ address) & 0xff00) != 0;                                  \
+    address;                                                                   \
   })
 #define NZ(v) [self updateNZFlags:(uint8)(v)]
-#define COMPARE(r, m)                                                         \
-  do                                                                          \
-    {                                                                         \
-      uint16 _d = (uint16)(r) - (uint16)(m);                                  \
-      s.status.c = (r) >= (m);                                                \
-      NZ ((uint8)_d);                                                         \
-    }                                                                         \
+#define COMPARE(r, m)                                                          \
+  do                                                                           \
+    {                                                                          \
+      uint16 _d = (uint16)(r) - (uint16)(m);                                   \
+      s.status.c = (r) >= (m);                                                 \
+      NZ ((uint8)_d);                                                          \
+    }                                                                          \
   while (0)
-#define BRANCH(cond)                                                          \
-  do                                                                          \
-    {                                                                         \
-      int8_t _off = (int8_t)FETCH8 ();                                        \
-      used = 2;                                                               \
-      if (cond)                                                               \
-        {                                                                     \
-          uint16 _from = pc;                                                  \
-          pc = (uint16)(pc + _off);                                           \
-          used += 1 + (((_from ^ pc) & 0xff00) != 0);                         \
-        }                                                                     \
-    }                                                                         \
+#define BRANCH(cond)                                                           \
+  do                                                                           \
+    {                                                                          \
+      int8_t _off = (int8_t)FETCH8 ();                                         \
+      used = 2;                                                                \
+      if (cond)                                                                \
+        {                                                                      \
+          uint16 _from = pc;                                                   \
+          pc = (uint16)(pc + _off);                                            \
+          used += 1 + (((_from ^ pc) & 0xff00) != 0);                          \
+        }                                                                      \
+    }                                                                          \
   while (0)
-#define ADC_VALUE(m)                                                          \
-  do                                                                          \
-    {                                                                         \
-      uint8 _m = (m), _a = a, _cin = s.status.c;                              \
-      uint16 _binary = (uint16)_a + _m + _cin;                                \
-      s.status.v = ((~(_a ^ _m) & (_a ^ (uint8)_binary) & 0x80) != 0);        \
-      if (s.status.d)                                                         \
-        {                                                                     \
-          uint16 _lo = (_a & 0x0f) + (_m & 0x0f) + _cin;                      \
-          uint16 _hi = (_a & 0xf0) + (_m & 0xf0);                             \
-          if (_lo > 9)                                                        \
-            {                                                                 \
-              _lo += 6;                                                       \
-              _hi += 0x10;                                                    \
-            }                                                                 \
-          if (_hi > 0x90)                                                     \
-            _hi += 0x60;                                                      \
-          s.status.c = _hi > 0xff;                                            \
-          a = (uint8)((_hi & 0xf0) | (_lo & 0x0f));                           \
-          s.status.n = ((uint8)_binary & 0x80) != 0;                          \
-          s.status.z = ((uint8)_binary == 0);                                 \
-        }                                                                     \
-      else                                                                    \
-        {                                                                     \
-          s.status.c = _binary > 0xff;                                        \
-          a = (uint8)_binary;                                                 \
-          NZ (a);                                                             \
-        }                                                                     \
-    }                                                                         \
+#define ADC_VALUE(m)                                                           \
+  do                                                                           \
+    {                                                                          \
+      uint8 _m = (m), _a = a, _cin = s.status.c;                               \
+      uint16 _binary = (uint16)_a + _m + _cin;                                 \
+      s.status.v = ((~(_a ^ _m) & (_a ^ (uint8)_binary) & 0x80) != 0);         \
+      if (s.status.d)                                                          \
+        {                                                                      \
+          uint16 _lo = (_a & 0x0f) + (_m & 0x0f) + _cin;                       \
+          uint16 _hi = (_a & 0xf0) + (_m & 0xf0);                              \
+          if (_lo > 9)                                                         \
+            {                                                                  \
+              _lo += 6;                                                        \
+              _hi += 0x10;                                                     \
+            }                                                                  \
+          if (_hi > 0x90)                                                      \
+            _hi += 0x60;                                                       \
+          s.status.c = _hi > 0xff;                                             \
+          a = (uint8)((_hi & 0xf0) | (_lo & 0x0f));                            \
+          s.status.n = ((uint8)_binary & 0x80) != 0;                           \
+          s.status.z = ((uint8)_binary == 0);                                  \
+        }                                                                      \
+      else                                                                     \
+        {                                                                      \
+          s.status.c = _binary > 0xff;                                         \
+          a = (uint8)_binary;                                                  \
+          NZ (a);                                                              \
+        }                                                                      \
+    }                                                                          \
   while (0)
 #define SBC_VALUE(m) ADC_VALUE ((uint8)((m) ^ 0xff))
-#define RMW_SHIFT(expr)                                                       \
-  do                                                                          \
-    {                                                                         \
-      old = [self readMemory:address];                                        \
-      value = (expr);                                                         \
-      [self writeMemory:value address:address];                               \
-      NZ (value);                                                             \
-    }                                                                         \
+#define RMW_SHIFT(expr)                                                        \
+  do                                                                           \
+    {                                                                          \
+      old = [self readMemory:address];                                         \
+      value = (expr);                                                          \
+      [self writeMemory:value address:address];                                \
+      NZ (value);                                                              \
+    }                                                                          \
   while (0)
 
   pc++; /* consume opcode */

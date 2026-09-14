@@ -161,3 +161,41 @@ Neither sibling workspace was modified.
 Hardware references: [Commodore 128 Programmer's Reference Guide](https://www.pagetable.com/docs/Commodore%20128%20Programmer%27s%20Reference%20Guide.pdf),
 [VICE MMU implementation](https://github.com/VICE-Team/svn-mirror/blob/main/vice/src/c128/c128mmu.c),
 and [VICE memory implementation](https://github.com/VICE-Team/svn-mirror/blob/main/vice/src/c128/c128mem.c).
+
+## Source formatting and API comments
+
+The checked-in `.clang-format` uses GNU style: two-space indentation, GNU
+brace placement, spaces before C function-call parentheses, and expanded
+control flow. Objective-C sources, headers, and tests use C-style comments;
+public header declarations have autogsdoc `/** ... */` descriptions with
+GSDoc markup. GNU99 and Objective-C 1.0 compatibility are retained.
+
+Use clang-format 22 (the version used for this formatting pass):
+
+```sh
+make format
+make format-check
+```
+
+Set `CLANG_FORMAT` if it is not on PATH, for example:
+
+```sh
+CLANG_FORMAT=/opt/homebrew/opt/llvm/bin/clang-format make format-check
+```
+
+The formatter operates on project source and tests, excluding generated app
+bundles, build output, firmware, and image assets. Makefiles, shell scripts,
+and project metadata retain their respective file formats.
+
+With the GNUstep environment loaded, generate API documentation with:
+
+```sh
+autogsdoc -Project C128 -DocumentationDirectory build/docs \
+  -DocumentInstanceVariables YES \
+  C128/CPU/*.h C128/Core/*.h C128/AppDelegate.h C128/UI/*.h
+```
+
+The installed GNUstep autogsdoc currently raises a `GSTimSort` assertion when
+generating the larger CPU6502 API page. Device, UI, and bus-protocol pages
+were generated successfully separately; this tool failure does not affect
+compilation or execution of the emulator.

@@ -29,6 +29,7 @@
 @end
 
 @implementation TestBus
+
 - (uint8)readMemory:(uint16)address
 {
   return bytes[address];
@@ -39,13 +40,12 @@
   bytes[address] = value;
 }
 
-- (void)loadBytes:(const uint8 *)data
-           length:(NSUInteger)length
-               at:(uint16)start
+- (void)loadBytes:(const uint8 *)data length:(NSUInteger)length at:(uint16)start
 {
   NSParameterAssert (length <= 65536 - start);
   memcpy (bytes + start, data, length);
 }
+
 @end
 
 int
@@ -53,15 +53,15 @@ main (int argc, char **argv)
 {
 #ifdef GNUSTEP
   extern char **environ;
-  GSInitializeProcess(argc, argv, environ);
+  GSInitializeProcess (argc, argv, environ);
 #endif
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   TestBus *bus = [[TestBus alloc] init];
   const uint8 program[] = {
-    0xA9, 0x2A,       // LDA #$2A
-    0x8D, 0x00, 0x20, // STA $2000
-    0xA2, 0x05,       // LDX #$05
-    0xE8              // INX
+    0xA9, 0x2A,       /* LDA #$2A */
+    0x8D, 0x00, 0x20, /* STA $2000 */
+    0xA2, 0x05,       /* LDX #$05 */
+    0xE8              /* INX */
   };
   [bus loadBytes:program length:sizeof (program) at:0x8000];
   [bus writeMemory:0x00 address:RESETVECTOR];

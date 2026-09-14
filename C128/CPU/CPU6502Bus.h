@@ -23,8 +23,11 @@
 
 #ifndef VIC20_UINT_TYPES_DEFINED
 #define VIC20_UINT_TYPES_DEFINED
+/** Unsigned 8-bit CPU data value. */
 typedef unsigned char uint8;
+/** Unsigned 16-bit CPU address value. */
 typedef unsigned short uint16;
+/** Unsigned 32-bit CPU helper value. */
 typedef unsigned int uint32;
 #endif
 
@@ -36,10 +39,16 @@ typedef unsigned int uint32;
  * machine. The CPU does not assume that reads and writes are side-effect free.
  */
 @protocol CPU6502Bus <NSObject>
-/** Reads and returns the byte mapped at address. */
+/**
+ * Reads the byte mapped at address. Device reads may have side effects such as
+ * acknowledging interrupts; callers must not assume a pure memory lookup.
+ */
 - (uint8)readMemory:(uint16)address;
 
-/** Writes value to the byte mapped at address. */
+/**
+ * Writes value through the mapping at address, including peripheral side
+ * effects and RAM writes beneath ROM as defined by the host machine.
+ */
 - (void)writeMemory:(uint8)value address:(uint16)address;
 @end
 

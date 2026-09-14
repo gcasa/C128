@@ -41,6 +41,7 @@
 @end
 
 @implementation CPU6502FlatMemory
+
 - (id)initWithSize:(NSUInteger)size
 {
   if ((self = [super init]) != nil)
@@ -50,20 +51,24 @@
     }
   return self;
 }
+
 - (void)dealloc
 {
   free (_bytes);
   [super dealloc];
 }
+
 - (uint8)readMemory:(uint16)address
 {
   return address < _size ? _bytes[address] : 0xFF;
 }
+
 - (void)writeMemory:(uint8)value address:(uint16)address
 {
   if (address < _size)
     _bytes[address] = value;
 }
+
 @end
 #endif
 
@@ -121,8 +126,8 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
 {
   NSDictionary *insDict = [NSDictionary
       dictionaryWithObjectsAndKeys:name, @"name", parameters, @"parameters",
-                                   cycles, @"cycles", methodName,
-                                   @"methodName", nil];
+                                   cycles, @"cycles", methodName, @"methodName",
+                                   nil];
   return insDict;
 }
 
@@ -151,7 +156,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   NSString *methodString = nil;
   NSString *parameterStatements = @"";
 
-  // compose parameters...
+  /* compose parameters... */
   for (int i = 0; i < par - 1; i++)
     {
       parameterStatements =
@@ -165,7 +170,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
               @"%X", i + 1];
     }
 
-  // Build method....
+  /* Build method.... */
   methodString =
       [NSString stringWithFormat:@"/* Implementation of %@ */\n"
                                  @"- (void) %@\n"
@@ -175,7 +180,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
                                  @"}\n",
                                  name, mname, name, parameterStatements];
 
-  // Add to methods...
+  /* Add to methods... */
   methodsString = [methodsString stringByAppendingString:methodString];
   methodsString = [methodsString stringByAppendingString:@"\n"];
 }
@@ -282,11 +287,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
    absolute      ASL oper      0E    3     6
    absolute,X    ASL oper,X    1E    3     7
    */
-  [self addOpcode:0x0a
-             name:@"ASL"
-           params:1
-           cycles:2
-           method:@"ASL_accumulator"];
+  [self addOpcode:0x0a name:@"ASL" params:1 cycles:2 method:@"ASL_accumulator"];
   [self addOpcode:0x06 name:@"ASL" params:2 cycles:5 method:@"ASL_zeropage"];
   [self addOpcode:0x16 name:@"ASL" params:2 cycles:6 method:@"ASL_zeropageX"];
   [self addOpcode:0x0e name:@"ASL" params:3 cycles:6 method:@"ASL_absolute"];
@@ -742,11 +743,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
    absolute      LSR oper      4E    3     6
    absolute,X    LSR oper,X    5E    3     7
    */
-  [self addOpcode:0x4a
-             name:@"LSR"
-           params:1
-           cycles:2
-           method:@"LSR_accumulator"];
+  [self addOpcode:0x4a name:@"LSR" params:1 cycles:2 method:@"LSR_accumulator"];
   [self addOpcode:0x46 name:@"LSR" params:2 cycles:3 method:@"LSR_zeropage"];
   [self addOpcode:0x56 name:@"LSR" params:2 cycles:4 method:@"LSR_zeropageX"];
   [self addOpcode:0x4e name:@"LSR" params:3 cycles:4 method:@"LSR_absolute"];
@@ -852,11 +849,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   absolute      ROL oper      2E    3     6
   absolute,X    ROL oper,X    3E    3     7
   */
-  [self addOpcode:0x2a
-             name:@"ROL"
-           params:1
-           cycles:2
-           method:@"ROL_accumulator"];
+  [self addOpcode:0x2a name:@"ROL" params:1 cycles:2 method:@"ROL_accumulator"];
   [self addOpcode:0x26 name:@"ROL" params:2 cycles:5 method:@"ROL_zeropage"];
   [self addOpcode:0x36 name:@"ROL" params:2 cycles:6 method:@"ROL_zeropageX"];
   [self addOpcode:0x2e name:@"ROL" params:3 cycles:6 method:@"ROL_absolute"];
@@ -876,11 +869,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
    absolute      ROR oper      6E    3     6
    absolute,X    ROR oper,X    7E    3     7
    */
-  [self addOpcode:0x6a
-             name:@"ROR"
-           params:1
-           cycles:2
-           method:@"ROR_accumulator"];
+  [self addOpcode:0x6a name:@"ROR" params:1 cycles:2 method:@"ROR_accumulator"];
   [self addOpcode:0x66 name:@"ROR" params:2 cycles:5 method:@"ROR_zeropage"];
   [self addOpcode:0x76 name:@"ROR" params:2 cycles:6 method:@"ROR_zeropageX"];
   [self addOpcode:0x6e name:@"ROR" params:3 cycles:6 method:@"ROR_absolute"];
@@ -1100,8 +1089,8 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   */
   [self addOpcode:0x98 name:@"TYA" params:1 cycles:2 method:@"TYA_implied"];
 
-  // [self generateMethods];  /* Used to generate the method calls for each
-  // instruction */
+  /* [self generateMethods];  /* Used to generate the method calls for each */
+  /* instruction * / */
   NSLog (@"####### Finished");
 }
 
@@ -1158,37 +1147,37 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
 
 - (void)reset
 {
-  // Initialize registers...
+  /* Initialize registers... */
   a = 0x00;
   x = 0x00;
   y = 0x00;
 
-  // Load PC from reset vector at 0xFFFC-0xFFFD
+  /* Load PC from reset vector at 0xFFFC-0xFFFD */
   uint8 pcl = [self readMemory:RESETVECTOR];
   uint8 pch = [self readMemory:RESETVECTOR + 1];
   pc = ((uint16)pch << 8) | pcl;
 
-  // Initialize stack pointer to 0xFF (top of stack)
+  /* Initialize stack pointer to 0xFF (top of stack) */
   sp = 0xFF;
 
-  // Initialize flags...
+  /* Initialize flags... */
   s.status.n = 0;
   s.status.v = 0;
   s.status.b = 0;
   s.status.d = 0;
-  s.status.i = 1; // Interrupts disabled after reset
+  s.status.i = 1; /* Interrupts disabled after reset */
   s.status.z = 0;
   s.status.c = 0;
-  s.status.unused = 1; // Bit 5 is always 1
+  s.status.unused = 1; /* Bit 5 is always 1 */
 
-  // Character ROM contents survive reset; do not replace a loaded ROM here.
+  /* Character ROM contents survive reset; do not replace a loaded ROM here. */
 }
 
 #if !defined(CPU6502_STANDALONE)
 - (void)resetVIC20System
 {
-  // Reset the machine's chips while preserving ROM selection and mounted
-  // media. Recreate the keyboard matrix so no host key remains held.
+  /* Reset the machine's chips while preserving ROM selection and mounted */
+  /* media. Recreate the keyboard matrix so no host key remains held. */
   [datasette stop];
   [vic reset];
   [via1 reset];
@@ -1222,12 +1211,12 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   uint8 opcode = [self readMemory:pc];
   [currentInstruction release];
   currentInstruction = [[NSNumber alloc] initWithUnsignedChar:opcode];
-  // PC will be incremented by execute methods as needed
+  /* PC will be incremented by execute methods as needed */
 }
 
 - (void)runAtLocation:(uint16)loc
 {
-  // return;
+  /* return; */
   pc = loc;
   [self fetch];
   [self debugLogWithFormat:@"=== Program execution start"];
@@ -1246,7 +1235,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
 
 - (void)step
 {
-  // This method is now used for single-step debugging
+  /* This method is now used for single-step debugging */
   [self execute];
 }
 
@@ -1255,7 +1244,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   cycles++;
 
 #if !defined(CPU6502_STANDALONE)
-  // Tick all chips for synchronized timing
+  /* Tick all chips for synchronized timing */
   if (vic)
     {
       [vic tick];
@@ -1312,7 +1301,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
     }
 }
 
-// Instruction interpretation....
+/* Instruction interpretation.... */
 - (void)execute
 {
 #if !defined(CPU6502_STANDALONE)
@@ -1344,7 +1333,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
     [self tick];
 }
 
-// Load
+/* Load */
 - (void)loadProgramFile:(NSString *)fileName atLocation:(uint16)loc
 {
   NSData *data = [NSData dataWithContentsOfFile:fileName];
@@ -1362,35 +1351,40 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
 {
   return pc;
 }
+
 - (uint8)getAccumulator
 {
   return a;
 }
+
 - (uint8)getXRegister
 {
   return x;
 }
+
 - (uint8)getYRegister
 {
   return y;
 }
+
 - (uint8)getStackPointer
 {
   return sp;
 }
+
 - (uint8)getStatusRegister
 {
   return s.sr | 0x20;
 }
+
 - (NSString *)getCurrentInstructionDescription
 {
   uint8 opcode = [self readMemory:pc];
   NSDictionary *instruction =
       [instructionMap objectForKey:[NSNumber numberWithUnsignedChar:opcode]];
   if (!instruction)
-    return
-        [NSString stringWithFormat:@"PC $%04X  Bytes %02X        Opcode ???",
-                                   pc, opcode];
+    return [NSString
+        stringWithFormat:@"PC $%04X  Bytes %02X        Opcode ???", pc, opcode];
 
   NSUInteger length =
       [[instruction objectForKey:@"parameters"] unsignedIntegerValue];
@@ -1405,6 +1399,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
                                     fixedBytes,
                                     [instruction objectForKey:@"name"]];
 }
+
 - (NSUInteger)getCycleCount
 {
   return cycles;
@@ -1422,8 +1417,9 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
 
 - (BOOL)handleKernalDiskTrap
 {
-  // Let the KERNAL execute SETNAM and SETLFS normally. This is important for
-  // tape and other devices; the drive shortcut applies only at LOAD on unit 8.
+  /* Let the KERNAL execute SETNAM and SETLFS normally. This is important for */
+  /* tape and other devices; the drive shortcut applies only at LOAD on unit 8.
+   */
   uint8 device = [self readMemory:0x00BA];
   if (pc != 0xFFD5 || device != 8 || ![diskDrive isDiskAttached])
     return NO;
@@ -1444,7 +1440,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   NSData *program = [diskDrive loadFileNamed:name error:&error];
   if (!program || [program length] < 2)
     {
-      a = 4; // KERNAL: FILE NOT FOUND
+      a = 4; /* KERNAL: FILE NOT FOUND */
       s.status.c = 1;
       [self returnFromKernalTrap];
       return YES;
@@ -1470,7 +1466,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   debug = enabled;
 }
 
-// Stack
+/* Stack */
 - (void)push:(uint8)value
 {
   [self writeMemory:value address:(STACKBASE + sp)];
@@ -1497,7 +1493,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   return [self readMemory:(STACKBASE + sp)];
 }
 
-// Helper methods for flag calculations
+/* Helper methods for flag calculations */
 - (void)updateNZFlags:(uint8)value
 {
   s.status.n = (value & 0x80) ? 1 : 0;
@@ -1547,32 +1543,32 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
     return [bus readMemory:address];
 
 #if !defined(CPU6502_STANDALONE)
-  // Fallback to old VIC integration for backward compatibility
-  // VIC-20 Memory Map:
-  // 0x9000-0x900F: VIC registers
-  // 0x9110-0x911F: VIA#1 registers
-  // 0x9120-0x912F: VIA#2 registers
-  // Other addresses: RAM/ROM
+  /* Fallback to old VIC integration for backward compatibility */
+  /* VIC-20 Memory Map: */
+  /* 0x9000-0x900F: VIC registers */
+  /* 0x9110-0x911F: VIA#1 registers */
+  /* 0x9120-0x912F: VIA#2 registers */
+  /* Other addresses: RAM/ROM */
 
   if (address >= 0x9000 && address <= 0x900F)
     {
-      // VIC register access
+      /* VIC register access */
       return [vic readVICRegister:address];
     }
 
   if (address >= 0x9110 && address <= 0x911F && via1)
     {
-      // VIA1 register access
+      /* VIA1 register access */
       return [via1 readRegister:(address - 0x9110)];
     }
 
   if (address >= 0x9120 && address <= 0x912F && via2)
     {
-      // VIA2 register access
+      /* VIA2 register access */
       return [via2 readRegister:(address - 0x9120)];
     }
 
-  // Default to RAM access
+  /* Default to RAM access */
   return [ram read:address];
 #else
   return 0xFF;
@@ -1600,29 +1596,29 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
     }
 
 #if !defined(CPU6502_STANDALONE)
-  // Fallback to old VIC integration for backward compatibility
+  /* Fallback to old VIC integration for backward compatibility */
   if (address >= 0x9000 && address <= 0x900F)
     {
-      // VIC register access
+      /* VIC register access */
       [vic writeVICRegister:address value:value];
       return;
     }
 
   if (address >= 0x9110 && address <= 0x911F && via1)
     {
-      // VIA1 register access
+      /* VIA1 register access */
       [via1 writeRegister:(address - 0x9110) value:value];
       return;
     }
 
   if (address >= 0x9120 && address <= 0x912F && via2)
     {
-      // VIA2 register access
+      /* VIA2 register access */
       [via2 writeRegister:(address - 0x9120) value:value];
       return;
     }
 
-  // Default to RAM access
+  /* Default to RAM access */
   [ram write:value loc:address];
 #endif
 }
@@ -1688,7 +1684,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   NSString *charROMPath =
       [romPath stringByAppendingPathComponent:@"characters.rom"];
 
-  // Load BASIC ROM
+  /* Load BASIC ROM */
   NSData *basicROM = [NSData dataWithContentsOfFile:basicROMPath];
   if (basicROM)
     {
@@ -1702,7 +1698,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
       NSLog (@"Warning: Could not load BASIC ROM from %@", basicROMPath);
     }
 
-  // Load KERNAL ROM
+  /* Load KERNAL ROM */
   NSData *kernalROM = [NSData dataWithContentsOfFile:kernalROMPath];
   if (kernalROM)
     {
@@ -1716,7 +1712,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
       NSLog (@"Warning: Could not load KERNAL ROM from %@", kernalROMPath);
     }
 
-  // Load Character ROM
+  /* Load Character ROM */
   NSData *charROM = [NSData dataWithContentsOfFile:charROMPath];
   if (charROM)
     {
@@ -1728,7 +1724,7 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
   else
     {
       NSLog (@"Warning: Could not load Character ROM from %@", charROMPath);
-      // Load default character set
+      /* Load default character set */
       if (vic)
         {
           [vic loadDefaultCharacterSet];
@@ -1769,20 +1765,20 @@ NOP impl ---  CPX abs   SBC abs     INC abs    --- F0    BEQ rel     SBC ind,Y
       return NO;
     }
 
-  // Auto-detect cartridge type based on size
+  /* Auto-detect cartridge type based on size */
   VIC20CartridgeType cartType = VIC20_CARTRIDGE_NONE;
   NSUInteger dataSize = [cartridgeData length];
 
   if (dataSize == 0x1000)
-    { // 4KB
+    { /* 4KB */
       cartType = VIC20_CARTRIDGE_4K;
     }
   else if (dataSize == 0x2000)
-    { // 8KB
+    { /* 8KB */
       cartType = VIC20_CARTRIDGE_8K;
     }
   else if (dataSize == 0x4000)
-    { // 16KB
+    { /* 16KB */
       cartType = VIC20_CARTRIDGE_16K;
     }
   else

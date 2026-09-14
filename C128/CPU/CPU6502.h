@@ -33,11 +33,14 @@
 #import "VIC6560.h"
 #endif
 
-// Type definitions for GNUstep compatibility
+/* Type definitions for GNUstep compatibility */
 #ifndef VIC20_UINT_TYPES_DEFINED
 #define VIC20_UINT_TYPES_DEFINED
+/** Unsigned 8-bit CPU data value. */
 typedef unsigned char uint8;
+/** Unsigned 16-bit CPU address value. */
 typedef unsigned short uint16;
+/** Unsigned 32-bit CPU helper value. */
 typedef unsigned int uint32;
 #endif
 
@@ -48,11 +51,19 @@ typedef unsigned int uint32;
 @class FallbackBASIC;
 #endif
 
-#define ZEROPAGE 0x0000    // 0x0000 - 0x00FF
-#define STACKBASE 0x0100   // 0x0100 - 0x01FF
-#define RESETVECTOR 0xFFFC // 0xFFFC - 0xFFFD
-#define IRQVECTOR 0xFFFE   // 0xFFFE - 0xFFFF
+/** Base address of the 256-byte zero page. */
+#define ZEROPAGE 0x0000 /* 0x0000 - 0x00FF */
+/** Base address of the 256-byte hardware stack page. */
+#define STACKBASE 0x0100 /* 0x0100 - 0x01FF */
+/** Low-byte address of the reset vector. */
+#define RESETVECTOR 0xFFFC /* 0xFFFC - 0xFFFD */
+/** Low-byte address of the maskable interrupt vector. */
+#define IRQVECTOR 0xFFFE /* 0xFFFE - 0xFFFF */
 
+/**
+ * Processor status flags in bit order: carry, zero, interrupt-disable, decimal,
+ * break, unused, overflow, and negative.
+ */
 struct status
 {
   unsigned int c : 1;
@@ -66,207 +77,364 @@ struct status
 };
 
 /**
- * CPU6502 provides the cpu6502 services used by the VIC-20 emulator.
+ * Reusable 6502 instruction engine. C64 and C128 machines provide CPU6502Bus
+ * implementations for their hardware memory maps. Define
+ * <code>CPU6502_STANDALONE=1</code> to omit the original VIC-20 device API.
+ * The CPU retains its bus; the owning machine advances external devices.
+ * Public execution methods operate on the emulation thread.
  */
 @interface CPU6502 : NSObject
 {
-  // Registers...
-  uint8 a;   // Accumulator
-  uint8 x;   // X register
-  uint8 y;   // Y register
-  uint16 pc; // Program counter
-  uint8 sp;  // stack pointer
+  /* Registers... */
+  /** Accumulator register. */
+  uint8 a; /* Accumulator */
+  /** X index register. */
+  uint8 x; /* X register */
+  /** Y index register. */
+  uint8 y; /* Y register */
+  /** Current program counter. */
+  uint16 pc; /* Program counter */
+  /** Byte offset within the emulated stack page. */
+  uint8 sp; /* stack pointer */
+
   union
   {
-    struct status status; // status register...
+    struct status status; /* status register... */
     uint8 sr;
   } s;
 
-  // Memory and I/O...
+  /* Memory and I/O... */
+  /** Retained host address bus. */
   id<CPU6502Bus> bus;
-  RAM *ram; // Owned flat-memory bus used by initWithSize:
+  /** Owned flat-memory backing for the original non-standalone initializer. */
+  RAM *ram; /* Owned flat-memory bus used by initWithSize: */
 #if !defined(CPU6502_STANDALONE)
+  /** Original VIC-20 video device, absent in standalone builds. */
   VIC6561 *vic;
+  /** Original VIC-20 VIA1 device, absent in standalone builds. */
   VIA6522 *via1;
+  /** Original VIC-20 VIA2 device, absent in standalone builds. */
   VIA6522 *via2;
+  /** Original VIC-20 keyboard matrix. */
   KeyboardMatrix *keyboard;
+  /** Original VIC-20 memory map. */
   VIC20MemoryManager *memoryManager;
+  /** Original VIC-20 tape device. */
   Datasette *datasette;
+  /** Original VIC-20 disk device. */
   DiskDrive *diskDrive;
+  /** Original VIC-20 fallback interpreter. */
   FallbackBASIC *fallbackBASIC;
+  /** Whether original VIC-20 fallback firmware is active. */
   BOOL fallbackROMActive;
 #endif
 
+  /** Accumulated CPU cycles; preserved across reset. */
   NSUInteger cycles;
+  /** Whether diagnostic logging is enabled. */
   BOOL debug;
 
-  // Current instruction
+  /* Current instruction */
+  /** Retained opcode wrapper populated by instruction fetch. */
   NSNumber *currentInstruction;
 }
 
-// Initialize with memory...
-/** Initializes the receiver with the supplied emulator state. */
+/* Initialize with memory... */
+/**
+ * Creates an owned flat-memory bus of size bytes and initializes the CPU with
+ * it. Does not fetch the reset vector; call -reset after initializing memory.
+ */
 - (id)initWithSize:(NSUInteger)size;
 
-/** Initializes a reusable CPU with a caller-supplied 16-bit address bus. */
+/**
+ * <init /> Initializes the CPU with non-nil addressBus and retains it. The
+ * caller supplies memory and I/O behavior. Call -reset to load the reset vector
+ * before execution.
+ */
 - (id)initWithBus:(id<CPU6502Bus>)addressBus;
 
 #if !defined(CPU6502_STANDALONE)
-/** Initializes the receiver with the supplied emulator state. */
+/**
+ * Initializes the original VIC-20 integration using memory and vicChip.
+ * Available only outside standalone builds.
+ */
 - (id)initWithRAM:(RAM *)memory VIC:(VIC6561 *)vicChip;
 
-/** Initializes a complete VIC-20 system and all of its emulated devices. */
+/**
+ * Creates the original VIC-20 device graph. Not available in standalone C128
+ * builds.
+ */
 - (id)initVIC20System;
 #endif
 
-// Reset/Interrupt...
-/** Restores the receiver to its initial emulated state. */
+/* Reset/Interrupt... */
+/**
+ * Clears CPU registers and flags, sets the stack pointer to $FF and
+ * interrupt-disable, and reads the mapped reset vector at $FFFC/$FFFD. Does not
+ * clear memory or the accumulated cycle count.
+ */
 - (void)reset;
 
 #if !defined(CPU6502_STANDALONE)
-/** Restores the receiver to its initial emulated state. */
+/**
+ * Resets the original VIC-20 devices and keyboard while preserving ROM/media
+ * selection. Available only outside standalone builds.
+ */
 - (void)resetVIC20System;
 #endif
 
-/** Performs the interrupt operation. */
+/**
+ * Enters the mapped IRQ vector at $FFFE/$FFFF and adds seven cycles unless
+ * interrupts are disabled, in which case it does nothing. The standalone
+ * machine must clock peripherals separately.
+ */
 - (void)interrupt;
 
-// Instruction fetch and interpret...
-/** Performs the fetch operation. */
+/* Instruction fetch and interpret... */
+/**
+ * Reads the opcode at the program counter into the current instruction without
+ * advancing the counter.
+ */
 - (void)fetch;
 
-/** Performs the execute operation. */
+/**
+ * Fetches and executes one instruction at the current program counter, updating
+ * registers, memory, and the cycle count.
+ */
 - (void)execute;
 
-/** Performs the execute at location operation. */
+/**
+ * Sets the program counter to loc and executes one instruction there.
+ */
 - (void)executeAtLocation:(uint16)loc;
 
-/** Performs the execute operation operation. */
+/**
+ * Executes the opcode represented by operation at the current program counter
+ * and advances the CPU by its reported cycle count.
+ */
 - (void)executeOperation:(NSNumber *)operation;
 
-/** Loads the supplied data into the emulator. */
+/**
+ * Writes all bytes from fileName through the bus beginning at loc. Treats the
+ * file as raw bytes, including any prefix; addresses wrap at 16 bits. Use the
+ * machine PRG loader for validated PRG loading.
+ */
 - (void)loadProgramFile:(NSString *)fileName atLocation:(uint16)loc;
 
-/** Performs the run at location operation. */
+/**
+ * Starts at loc and runs the legacy synchronous instruction loop until the
+ * current opcode is zero. This loop is unbounded for nonterminating programs;
+ * application scheduling uses -step instead.
+ */
 - (void)runAtLocation:(uint16)loc;
 
-// Memory access (with VIC integration)
-/** Returns the requested emulator value. */
+/* Memory access (with VIC integration) */
+/**
+ * Reads one byte at address through the attached bus, including any
+ * memory-mapped I/O side effects.
+ */
 - (uint8)readMemory:(uint16)address;
 
-/** Updates the requested emulator value. */
+/**
+ * Writes value to address through the attached bus.
+ */
 - (void)writeMemory:(uint8)value address:(uint16)address;
 
-/** Updates the requested emulator value. */
+/**
+ * Compatibility spelling of -writeMemory:address: using address as the
+ * location.
+ */
 - (void)writeMemory:(uint8)value loc:(uint16)address;
 
-/** Updates the requested emulator value. */
+/**
+ * Sets the program counter to address without executing or resetting the CPU.
+ */
 - (void)setProgramCounter:(uint16)address;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the current 16-bit program counter.
+ */
 - (uint16)getProgramCounter;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the accumulator register.
+ */
 - (uint8)getAccumulator;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the X index register.
+ */
 - (uint8)getXRegister;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the Y index register.
+ */
 - (uint8)getYRegister;
 
-/** Returns the current stack pointer. */
+/**
+ * Returns the stack offset within page $01.
+ */
 - (uint8)getStackPointer;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the processor status byte with the unused bit forced to one.
+ */
 - (uint8)getStatusRegister;
 
-/** Returns a short disassembly of the instruction at the program counter. */
+/**
+ * Returns an autoreleased disassembly summary of the instruction at the program
+ * counter. Reads instruction bytes through the bus.
+ */
 - (NSString *)getCurrentInstructionDescription;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the accumulated CPU cycle count; -reset does not zero it.
+ */
 - (NSUInteger)getCycleCount;
 
-/** Updates the requested emulator value. */
+/**
+ * Enables diagnostic logging when enabled is YES.
+ */
 - (void)setDebug:(BOOL)enabled;
 
-// Component access
+/* Component access */
 #if !defined(CPU6502_STANDALONE)
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 video device in non-standalone builds.
+ */
 - (VIC6561 *)getVIC;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 VIA1 device in non-standalone builds.
+ */
 - (VIA6522 *)getVIA1;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 VIA2 device in non-standalone builds.
+ */
 - (VIA6522 *)getVIA2;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 keyboard matrix in non-standalone
+ * builds.
+ */
 - (KeyboardMatrix *)getKeyboard;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 memory manager in non-standalone builds.
+ */
 - (VIC20MemoryManager *)getMemoryManager;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 tape device in non-standalone builds.
+ */
 - (Datasette *)getDatasette;
 
-/** Returns the requested emulator value. */
+/**
+ * Returns the borrowed original VIC-20 disk device in non-standalone builds.
+ */
 - (DiskDrive *)getDiskDrive;
 
-// System control
-/** Loads the supplied data into the emulator. */
+/* System control */
+/**
+ * Loads original VIC-20 firmware from romPath in non-standalone builds; not the
+ * C128 ROM loader.
+ */
 - (void)loadROMs:(NSString *)romPath;
 
-/** Loads the supplied data into the emulator. */
+/**
+ * Installs original VIC-20 fallback firmware and reports success. Not available
+ * in standalone C128 builds.
+ */
 - (BOOL)loadFallbackROMs;
 
-/** Performs the enqueue fallback character operation. */
+/**
+ * Queues character for the original VIC-20 fallback interpreter in
+ * non-standalone builds.
+ */
 - (void)enqueueFallbackCharacter:(unichar)character;
 
-/** Loads the supplied data into the emulator. */
+/**
+ * Attempts to insert cartridgeData into the original VIC-20 memory map and
+ * reports success. Not available in standalone C128 builds.
+ */
 - (BOOL)insertCartridge:(NSData *)cartridgeData;
 
-/** Removes the installed cartridge image. */
+/**
+ * Removes the original VIC-20 cartridge in non-standalone builds.
+ */
 - (void)removeCartridge;
 
-/** Performs the configure memory expansion operation. */
+/**
+ * Configures original VIC-20 expansion blocks using enable3K, enable8K1, and
+ * enable8K2. Not available in standalone C128 builds.
+ */
 - (void)configureMemoryExpansion:(BOOL)enable3K
                        enable8K1:(BOOL)enable8K1
                        enable8K2:(BOOL)enable8K2;
 #endif
 
-// Run...
-/** Performs the run operation. */
+/* Run... */
+/**
+ * Invokes the legacy synchronous run loop at address zero. Application
+ * schedulers should use -step for bounded execution.
+ */
 - (void)run;
 
-/** Performs the step operation. */
+/**
+ * Executes one instruction and accounts for its CPU cycles. In standalone
+ * builds, external peripheral clocks remain the machine scheduler's
+ * responsibility.
+ */
 - (void)step;
 
-/** Performs the state operation. */
+/**
+ * Logs current CPU registers and flags; debug mode may also log original VIC-20
+ * device state.
+ */
 - (void)state;
 
-/** Performs the tick operation. */
+/**
+ * Adds one CPU cycle. Original VIC-20 integrations also clock their devices;
+ * standalone C128 builds leave external devices to the machine scheduler.
+ */
 - (void)tick;
 
-// Stack...
-/** Performs the push operation. */
+/* Stack... */
+/**
+ * Writes value to the stack at $0100 plus the stack pointer, then decrements
+ * the pointer with byte wraparound.
+ */
 - (void)push:(uint8)value;
 
-/** Performs the pop operation. */
+/**
+ * Increments the stack pointer with byte wraparound and returns the byte at the
+ * resulting stack address.
+ */
 - (uint8)pop;
 
-// Debug
-/** Performs the debug log with format operation. */
+/* Debug */
+/**
+ * Logs formatString and its variadic arguments only when debug logging is
+ * enabled.
+ */
 - (void)debugLogWithFormat:(NSString *)formatString, ...;
 
-// Helper methods for flag calculations
-/** Performs the update nzflags operation. */
+/* Helper methods for flag calculations */
+/**
+ * Sets negative from bit 7 of value and zero according to whether value is
+ * zero.
+ */
 - (void)updateNZFlags:(uint8)value;
 
-/** Updates the requested emulator value. */
+/**
+ * Sets the carry flag to carry.
+ */
 - (void)setCarryFlag:(BOOL)carry;
 
-/** Updates the requested emulator value. */
+/**
+ * Sets the overflow flag to overflow.
+ */
 - (void)setOverflowFlag:(BOOL)overflow;
 
 @end
