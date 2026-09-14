@@ -71,7 +71,12 @@ Control, Option/Alt (Commodore), and shifted punctuation use the C64 keyboard
 matrix. Extended C128 keypad and dedicated extra keys are not yet mapped.
 
 - **Machine → Boot in 40 / 80 Columns** toggles the hardware column key and resets.
-- **Show 40 / 80 Column Display** switches the monitor without resetting (Command-8).
+- **Show Both Displays** opens a second monitor window (Command-B). Both show
+  the same running machine without resetting it, and either window accepts
+  keyboard input. BASIC writes to its currently selected display; this does
+  not duplicate its output. Close the extra window or use Command-B again to
+  return to one monitor.
+- **Show 40 / 80 Column Display** switches the monitor without resetting (Command-8); with both windows open, it swaps their displays.
 - **Reset** clears RAM and reboots C128 mode (Command-R).
 - **Pause / Resume** pauses execution (Command-P); **RESTORE** sends NMI.
 - **File → Load PRG…** loads a program (Command-O). Wait for `READY.` first.

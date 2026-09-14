@@ -101,14 +101,16 @@
 
 @interface AppDelegate : NSObject {
   C128Machine *machine;
-  NSWindow *window;
-  C128Display *display;
+  NSWindow *window, *secondWindow;
+  C128Display *display, *secondDisplay;
   NSTimer *timer;
   BOOL paused;
   NSTimeInterval lastTime;
   double cycleBudget;
 }
 - (void)reset:(id)sender;
+- (void)updateDisplayTitles;
+- (void)clearKeys;
 @end
 @implementation AppDelegate
 - (void)addItem:(NSString *)title action:(SEL)action key:(NSString *)key menu:(NSMenu *)menu {
@@ -131,15 +133,17 @@
   [self addItem:@"Reset" action:@selector(reset:) key:@"r" menu:controls];
   [self addItem:@"Pause / Resume" action:@selector(pause:) key:@"p" menu:controls];
   [self addItem:@"Show 40 / 80 Column Display" action:@selector(toggleDisplay:) key:@"8" menu:controls];
+  [self addItem:@"Show Both Displays" action:@selector(toggleBothDisplays:) key:@"b" menu:controls];
   [self addItem:@"Boot in 40 / 80 Columns" action:@selector(toggleBoot:) key:@"" menu:controls];
   [self addItem:@"RESTORE" action:@selector(restore:) key:@"" menu:controls];
   window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 768, 544)
       styleMask:NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask | NSResizableWindowMask
       backing:NSBackingStoreBuffered defer:NO];
-  [window setTitle:@"C128 — PAL"]; [window setDelegate:(id)self];
+  [window setReleasedWhenClosed:NO]; [window setDelegate:(id)self];
   [window setContentMinSize:NSMakeSize(384, 272)];
   display = [[C128Display alloc] initWithFrame:NSMakeRect(0, 0, 768, 544)];
   display->machine = machine; [window setContentView:display];
+  [self updateDisplayTitles];
   [window center]; [window makeKeyAndOrderFront:nil]; [window makeFirstResponder:display];
   NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"ROMDirectory"];
   NSString *local = [[[NSFileManager defaultManager] currentDirectoryPath] stringByAppendingPathComponent:@"roms"];
@@ -160,9 +164,10 @@
     NSUInteger before = [machine->cpu getCycleCount];
     if (cycleBudget >= 1) [machine runCycles:(NSUInteger)cycleBudget];
     cycleBudget -= [machine->cpu getCycleCount] - before;
-    if (machine->memory->unsupportedCPU) { paused = YES; [window setTitle:@"C128 — Stopped: Z80 or missing C64 ROMs"]; }
+    if (machine->memory->unsupportedCPU) { paused = YES; [self updateDisplayTitles]; }
   }
   [display setNeedsDisplay:YES];
+  if ([secondWindow isVisible]) [secondDisplay setNeedsDisplay:YES];
 }
 - (void)showError:(NSError *)error { [[NSAlert alertWithError:error] runModal]; }
 - (void)chooseROMs:(id)sender {
@@ -187,17 +192,68 @@
       : [NSString stringWithFormat:@"Loaded at $%04X (%u). Use the program's documented SYS entry address to start it.", start, start]];
   [alert runModal]; [alert release];
 }
-- (void)reset:(id)sender { if (machine->memory->hasROMs) [machine reset];
-  [display clearKeys]; paused = NO; cycleBudget = 0; [window setTitle:@"C128 — PAL"]; }
-- (void)pause:(id)sender { paused = !paused; cycleBudget = 0;
-  [window setTitle:paused ? @"C128 — Paused" : @"C128 — PAL"]; [display clearKeys]; }
-- (void)toggleDisplay:(id)sender { display->wide = !display->wide; [display setNeedsDisplay:YES]; }
-- (void)toggleBoot:(id)sender { machine->memory->columns80 = !machine->memory->columns80; display->wide = machine->memory->columns80; [self reset:nil]; }
+- (void)clearKeys { [display clearKeys]; [secondDisplay clearKeys]; }
+- (void)updateDisplayTitles {
+  NSString *status = machine->memory->unsupportedCPU ? @"Stopped: Z80 or missing C64 ROMs" : (paused ? @"Paused" : @"PAL");
+  [window setTitle:[NSString stringWithFormat:@"C128 — %@ — %@", display->wide ? @"80 Columns (VDC)" : @"40 Columns (VIC-II)", status]];
+  if (secondDisplay) {
+    secondDisplay->wide = !display->wide;
+    [secondWindow setTitle:[NSString stringWithFormat:@"C128 — %@ — %@", secondDisplay->wide ? @"80 Columns (VDC)" : @"40 Columns (VIC-II)", status]];
+    [secondDisplay setNeedsDisplay:YES];
+  }
+  [display setNeedsDisplay:YES];
+}
+- (void)reset:(id)sender {
+  if (machine->memory->hasROMs) [machine reset];
+  [self clearKeys]; paused = NO; cycleBudget = 0; [self updateDisplayTitles];
+}
+- (void)pause:(id)sender {
+  paused = !paused; cycleBudget = 0; [self clearKeys]; [self updateDisplayTitles];
+}
+- (void)toggleDisplay:(id)sender {
+  display->wide = !display->wide; [self updateDisplayTitles];
+}
+- (void)toggleBothDisplays:(id)sender {
+  [self clearKeys];
+  if ([window isVisible] && [secondWindow isVisible]) {
+    [secondWindow orderOut:nil]; [window makeKeyAndOrderFront:nil]; return;
+  }
+  if (!secondWindow) {
+    secondWindow = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 768, 544)
+      styleMask:NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask | NSResizableWindowMask
+      backing:NSBackingStoreBuffered defer:NO];
+    [secondWindow setReleasedWhenClosed:NO]; [secondWindow setDelegate:(id)self];
+    [secondWindow setContentMinSize:NSMakeSize(384, 272)];
+    secondDisplay = [[C128Display alloc] initWithFrame:NSMakeRect(0, 0, 768, 544)];
+    secondDisplay->machine = machine; [secondWindow setContentView:secondDisplay];
+    [secondWindow makeFirstResponder:secondDisplay];
+    // Arrange both monitors within the current screen; users can resize them independently.
+    NSScreen *screen = [window screen]; if (!screen) screen = [NSScreen mainScreen];
+    NSRect available = NSInsetRect([screen visibleFrame], 12, 12);
+    CGFloat width = MIN(768, (available.size.width - 12) / 2);
+    CGFloat height = MIN(566, available.size.height);
+    NSRect left = NSMakeRect(available.origin.x, NSMaxY(available) - height, width, height);
+    [window setFrame:left display:YES];
+    left.origin.x += width + 12; [secondWindow setFrame:left display:YES];
+  }
+  [self updateDisplayTitles];
+  [window orderFront:nil]; [secondWindow makeKeyAndOrderFront:nil];
+}
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+  if ([item action] == @selector(toggleBothDisplays:))
+    [item setState:([window isVisible] && [secondWindow isVisible]) ? NSOnState : NSOffState];
+  return YES;
+}
+- (void)toggleBoot:(id)sender {
+  machine->memory->columns80 = !machine->memory->columns80;
+  display->wide = machine->memory->columns80; [self reset:nil];
+}
 - (void)restore:(id)sender { if (machine->memory->hasROMs) [machine restore]; }
-- (void)windowDidResignKey:(NSNotification *)note { [display clearKeys]; }
+- (void)windowDidResignKey:(NSNotification *)note { [self clearKeys]; }
+- (void)windowWillClose:(NSNotification *)note { [self clearKeys]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)note { [timer invalidate]; }
-- (void)dealloc { [timer release]; [display release]; [window release]; [machine release]; [super dealloc]; }
+- (void)dealloc { [timer release]; [secondDisplay release]; [secondWindow release]; [display release]; [window release]; [machine release]; [super dealloc]; }
 @end
 int main(int argc, char **argv) {
 #ifdef GNUSTEP
