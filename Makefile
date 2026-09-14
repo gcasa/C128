@@ -5,6 +5,8 @@ FLAGS = -std=gnu99 -O2 -Wall -Wextra -Wno-unused-parameter -fobjc-exceptions -DC
 BUILD_DIR = build
 CPU = C128/CPU/CPU6502.m C128/CPU/CPU6502+Instructions.m
 CORE = $(CPU) $(wildcard C128/Core/*.m)
+UI = C128/AppDelegate.m $(wildcard C128/UI/*.m)
+UI_HEADERS = C128/AppDelegate.h $(wildcard C128/UI/*.h)
 HEADERS = $(wildcard C128/CPU/*.h C128/Core/*.h)
 ifeq ($(UNAME),Darwin)
 BASE_LIBS = -framework Foundation
@@ -26,9 +28,9 @@ C128/Resources/AppIcon.icns: C128/Resources/AppIcon.png tools/build-icon.sh
 build/C128.app/Contents/Resources/AppIcon.icns: C128/Resources/AppIcon.icns
 	mkdir -p $(dir $@)
 	cp $< $@
-$(APP): $(CORE) $(HEADERS) C128/main.m C128/Info.plist
+$(APP): $(CORE) $(HEADERS) $(UI) $(UI_HEADERS) C128/main.m C128/Info.plist
 	mkdir -p $(dir $@)
-	$(CC) $(FLAGS) $(CORE) C128/main.m -o $@ $(GUI_LIBS)
+	$(CC) $(FLAGS) $(CORE) $(UI) C128/main.m -o $@ $(GUI_LIBS)
 ifeq ($(UNAME),Darwin)
 	cp C128/Info.plist build/C128.app/Contents/Info.plist
 endif

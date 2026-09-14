@@ -101,8 +101,11 @@ C128 mode. Files extending beyond the address space are rejected.
 - `C128/Core/VDC8563`: separate 64 KiB video RAM, indexed registers, sequential
   access, block fill/copy, text attributes/cursor, and a basic bitmap renderer.
 - `C128/Core/C128Machine`: CPU scheduling and interrupt delivery.
-- `C128/main.m`: programmatic AppKit UI, display selection, keyboard, panels,
-  menus, and frame pacing. No nib or Cocoa binding dependencies.
+- `C128/AppDelegate`: application lifecycle, windows, display selection, panels,
+  menus, and frame pacing.
+- `C128/UI/C128Display`: bitmap display and keyboard input.
+- `C128/main.m`: application entry point and autorelease pool setup.
+  The UI is programmatic, with no nib or Cocoa binding dependencies.
 
 ## Validation
 
