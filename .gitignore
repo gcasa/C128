@@ -1,0 +1,9 @@
+build/
+obj/
+*.app/
+*.d
+.DS_Store
+*.xcuserstate
+xcuserdata/
+roms/*.rom
+roms/*.bin
