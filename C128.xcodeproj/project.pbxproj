@@ -5,6 +5,28 @@
   objectVersion = 56;
   archiveVersion = 1;
   objects = {
+    AA0000000000000000000080 = {
+      path = C128/CPU/CPUZ80.m;
+      isa = PBXFileReference;
+      lastKnownFileType = sourcecode.c.objc;
+      sourceTree = SOURCE_ROOT;
+    };
+    AA0000000000000000000081 = {
+      path = C128/CPU/CPUZ80.h;
+      isa = PBXFileReference;
+      lastKnownFileType = sourcecode.c.h;
+      sourceTree = SOURCE_ROOT;
+    };
+    AA0000000000000000000082 = {
+      path = C128/CPU/CPUZ80Bus.h;
+      isa = PBXFileReference;
+      lastKnownFileType = sourcecode.c.h;
+      sourceTree = SOURCE_ROOT;
+    };
+    AA0000000000000000000083 = {
+      isa = PBXBuildFile;
+      fileRef = AA0000000000000000000080;
+    };
     98F54143AB4E86B28C3AFEE0 = {
       buildConfigurationList = 862894B703A6DEDF96A9DD6C;
       projectDirPath = "";
@@ -63,6 +85,7 @@
       isa = PBXSourcesBuildPhase;
       buildActionMask = 2147483647;
       files = (
+        AA0000000000000000000083,
         817ECB95490DDE3228A679F5,
         E512FD7FF8CF793C6C1B7658,
         8EBFECB48096711ACA3F1947,
@@ -166,6 +189,9 @@
         104AA4DB047C2EE7212D99AF,
         7CB690AD185E0A92E51F0FEE,
         B705912CDA12DF312A46B276,
+        AA0000000000000000000080,
+        AA0000000000000000000081,
+        AA0000000000000000000082,
         2B11EF94B6827780DC15B59B,
         3BA43A0FC2C1E454DAA76C62,
         F84FF3AE7E296A49FBABF487,

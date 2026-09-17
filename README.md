@@ -92,7 +92,8 @@ C128 mode. Files extending beyond the address space are rejected.
 
 ## Structure
 
-- `C128/CPU`: reusable 6502 bus/core from VIC20, used as the 8502 instruction engine.
+- `C128/CPU`: reusable 6502 bus/core from VIC20, used as the 8502 instruction engine,
+  and an original, standalone Objective-C 1.0 Z80 core (`CPUZ80`).
 - `C128/Core/C64*`: shared C64 bus, video renderer, and CPU NMI helper retained
   from the sibling C64 app, including the C64 compatibility memory map.
 - `C128/Core/CIA6526`: timer/port/interrupt implementation, extended with serial
@@ -130,10 +131,53 @@ with Foundation and GCC 16 with GNUstep's GNU Objective-C runtime. Cocoa,
 GNUstep application, and Xcode Debug builds succeeded. Cocoa 40/80 displays
 were also inspected visually. Linux GUI execution has not been tested here.
 
+## Reusable Z80 core
+
+`CPUZ80` is written from scratch using Objective-C 1.0 and manual memory
+management. It implements the documented Z80 instruction set, alternate
+registers, IX/IY, all seven opcode families, interrupt modes 0/1/2, edge-latched
+NMI, EI delay, HALT, refresh-register updates, and instruction T-state counts.
+Common undocumented instructions include index-register halves, SLL, indexed
+CB register copies, NEG/RETN/IM aliases, and undefined ED NOPs. WZ and the Q
+flag latch are tracked for undocumented flags.
+
+Implement `CPUZ80Bus` for memory, full 16-bit I/O ports, interrupt acknowledge,
+and RETI notification, then initialize with `initWithBus:`. The CPU retains
+that bus. `step` returns elapsed T-states, allowing a host to clock devices.
+Block-repeat instructions yield after each iteration so interrupts can be
+accepted between iterations. `state`/`setState:` copy all execution state;
+register pairs are numeric values independent of host byte order. `reset`
+preserves the cycle counter and leaves memory untouched. General registers
+have deterministic reset values rather than undefined power-on contents.
+
+`make test` includes exhaustive 8-bit ALU operand/carry combinations, valid
+packed-BCD arithmetic, INC/DEC and CB operations, plus indexed addressing,
+interrupt entry/return, EI/HALT, refresh, wrapping, block transfers and I/O.
+An optional runner checks the 1,356 Fuse reference vectors against registers,
+flags, WZ, final memory and aggregate instruction timing:
+
+```sh
+make -f Makefile build/CPUZ80Tests
+sh tools/test-z80-fuse.sh ./build/CPUZ80Tests
+# GNUstep: pass ./build/gnustep/CPUZ80Tests instead.
+```
+
+The script downloads only pinned test data into `build/z80-reference`; the
+normal test suite is offline and requires no firmware or third-party code.
+The implementation reference is the
+[Zilog Z80 CPU User Manual](https://www.zilog.com/docs/z80/um0080.pdf).
+
+This core is instruction-granular: no WAIT/BUSRQ pin interface, individual bus
+T-state callbacks, or contention model. Passing the reference vectors is not
+a claim of every silicon-specific behavior: interrupt-adjacent LD A,I/R flag
+quirks and recent discoveries concerning repeating block-I/O flags are not
+modeled. The C128 scheduler still uses the 8502; Z80-specific C128 memory/I/O
+mapping, CPU handoff and the reset bootstrap remain separate integration work.
+
 ## Current limits
 
 Reset enters the 8502 KERNAL reset vector directly, bypassing the initial Z80
-cartridge-detection bootstrap. **There is no Z80 execution or CP/M support.**
+cartridge-detection bootstrap. **The machine does not yet schedule the standalone Z80 core or support CP/M.**
 Switching to Z80, or to C64 without its ROM pair, stops execution and labels the
 window; reset recovers. Function ROM slots read as empty. MMU relocation covers
 forward page mapping; hardware reverse page exchange is not modeled.
