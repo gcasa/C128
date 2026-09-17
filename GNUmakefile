@@ -15,6 +15,9 @@ C128_OBJCFLAGS = -std=gnu99
 
 include $(GNUSTEP_MAKEFILES)/application.make
 
+after-C128-all::
+	sh tools/copy-roms.sh C128.app/Resources/roms
+
 .PHONY: test format format-check
 test:
 	$(MAKE) -f Makefile UNAME=GNUstep test

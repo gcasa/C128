@@ -274,6 +274,20 @@
       );
       runOnlyForDeploymentPostprocessing = 0;
     };
+    AA0000000000000000000003 = {
+      isa = PBXShellScriptBuildPhase;
+      buildActionMask = 2147483647;
+      files = (
+      );
+      inputPaths = (
+      );
+      name = "Copy local ROMs";
+      outputPaths = (
+      );
+      runOnlyForDeploymentPostprocessing = 0;
+      shellPath = /bin/sh;
+      shellScript = "cd \"${SRCROOT}\" && sh tools/copy-roms.sh \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/roms\"";
+    };
     E512FD7FF8CF793C6C1B7658 = {
       isa = PBXBuildFile;
       fileRef = C1C5E0EF9AEA5AE31462AB0D;
@@ -396,6 +410,7 @@
         BCE16DD0260827ECF338C787,
         7561BFB015D8F536760CB671,
         0189424A5A60FED329FA868E,
+        AA0000000000000000000003,
       );
       dependencies = (
       );

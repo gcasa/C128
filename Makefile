@@ -14,6 +14,7 @@ BASE_LIBS = -framework Foundation
 GUI_LIBS = -framework Cocoa
 APP = build/C128.app/Contents/MacOS/C128
 ICON = build/C128.app/Contents/Resources/AppIcon.icns
+APP_ROMS = build/C128.app/Contents/Resources/roms
 else
 BUILD_DIR = build/gnustep
 CC = $(shell $(GNUSTEP_CONFIG) --variable=CC)
@@ -21,10 +22,15 @@ FLAGS += $(shell $(GNUSTEP_CONFIG) --objc-flags)
 BASE_LIBS = $(shell $(GNUSTEP_CONFIG) --base-libs)
 GUI_LIBS = $(shell $(GNUSTEP_CONFIG) --gui-libs)
 APP = build/C128
+APP_ROMS = build/roms
 endif
 .PHONY: all test clean run format format-check
 
-all: $(APP) $(ICON)
+all: $(APP) $(ICON) roms-copy
+
+.PHONY: roms-copy
+roms-copy:
+	sh tools/copy-roms.sh $(APP_ROMS)
 
 format:
 	sh tools/format.sh

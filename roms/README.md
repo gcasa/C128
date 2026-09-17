@@ -1,6 +1,7 @@
 # Firmware
 
-ROMs are user-supplied and excluded from source control and app bundles.
+ROMs are user-supplied and excluded from source control. Local builds copy
+available `.rom` files into their app output.
 See the root README for required sizes. This local workspace uses these files
 from `/opt/homebrew/share/vice/C128`:
 

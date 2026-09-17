@@ -59,11 +59,13 @@ Choose **File → Choose ROM Folder…**. Required files:
 | basic64.rom | 8192 | Optional C64 BASIC; supply with kernal64.rom |
 | kernal64.rom | 8192 | Optional C64 KERNAL; supply with basic64.rom |
 
-The entire selection is validated before replacing active firmware. The app
-remembers the folder and also checks `roms` in its working directory and next
-to the project's build directory. No ROMs are embedded in either app bundle.
+The entire selection is validated before replacing active firmware. Builds copy
+locally supplied `roms/*.rom` files into the app output. The app checks that
+copy first, then the remembered folder, `roms` in its working directory, and
+`roms` next to the project's build directory. ROM images remain excluded from
+source control.
 Local test images were copied from the existing VICE installation; see
-[roms/README.md](roms/README.md). ROM images are excluded by `.gitignore`.
+[roms/README.md](roms/README.md).
 
 Type directly into the window. Return submits a line, Escape is RUN/STOP,
 Backspace is DEL, Home is HOME, and arrows operate the cursor. F1–F8,

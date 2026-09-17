@@ -76,9 +76,10 @@
   display->machine = machine;
   [window setContentView:display];
   [self updateDisplayTitles];
-  [window center];
-  [window makeKeyAndOrderFront:nil];
-  [window makeFirstResponder:display];
+  NSString *bundled = [[[NSBundle mainBundle] resourcePath]
+      stringByAppendingPathComponent:@"roms"];
+  NSString *besideExecutable = [[[[NSBundle mainBundle] executablePath]
+      stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"roms"];
   NSString *saved =
       [[NSUserDefaults standardUserDefaults] stringForKey:@"ROMDirectory"];
   NSString *local = [[[NSFileManager defaultManager] currentDirectoryPath]
@@ -86,10 +87,15 @@
   NSString *adjacent =
       [[[[NSBundle mainBundle] bundlePath] stringByDeletingLastPathComponent]
           stringByAppendingPathComponent:@"../roms"];
-  if ((saved && [machine->memory loadROMDirectory:saved error:NULL]) ||
+  if ([machine->memory loadROMDirectory:bundled error:NULL] ||
+      [machine->memory loadROMDirectory:besideExecutable error:NULL] ||
+      (saved && [machine->memory loadROMDirectory:saved error:NULL]) ||
       [machine->memory loadROMDirectory:local error:NULL] ||
       [machine->memory loadROMDirectory:adjacent error:NULL])
     [machine reset];
+  [window center];
+  [window makeKeyAndOrderFront:nil];
+  [window makeFirstResponder:display];
   lastTime = [NSDate timeIntervalSinceReferenceDate];
   timer = [[NSTimer scheduledTimerWithTimeInterval:1.0 / 60
                                             target:self
