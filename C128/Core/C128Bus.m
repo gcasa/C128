@@ -122,7 +122,7 @@ fail (NSError **error, NSString *message)
   memcpy (basic128 + 16384, [[images objectAtIndex:1] bytes], 16384);
   memcpy (system128, [[images objectAtIndex:2] bytes], 16384);
   memcpy (characters128, [[images objectAtIndex:3] bytes], 8192);
-  memcpy (characters, characters128 + 4096, 4096);
+  memcpy (characters, characters128, 4096);
   hasC64ROMs = b64 != nil;
   if (hasC64ROMs)
     {
